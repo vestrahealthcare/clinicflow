@@ -163,6 +163,37 @@ export function computeDoctorIdleTime(
   return result;
 }
 
+/** Groups the six raw stages into the three buckets the room-utilization view shows. */
+export function utilizationBucket(stage: Stage): "Vacant" | "Occupied" | "Needs cleanup" {
+  if (stage === "vacant") return "Vacant";
+  if (stage === "needs_cleanup") return "Needs cleanup";
+  return "Occupied";
+}
+
+/** Minimal CSV encoder: quotes any field containing a comma, quote, or newline. */
+export function toCsv(rows: Record<string, string | number | null>[]): string {
+  if (rows.length === 0) return "";
+  const headers = Object.keys(rows[0]);
+  const escape = (v: string | number | null) => {
+    const s = v === null || v === undefined ? "" : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [headers.join(",")];
+  rows.forEach((row) => lines.push(headers.map((h) => escape(row[h])).join(",")));
+  return lines.join("\n");
+}
+
+/** Triggers a browser download of a CSV string — no server round trip needed. */
+export function downloadCsv(filename: string, csv: string): void {
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export type TimerColor = "normal" | "yellow" | "red";
 
 /**

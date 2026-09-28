@@ -80,6 +80,7 @@ export interface RoomHistoryRow {
   stage: Stage;
   duration_ms: number;
   provider_name: string | null;
+  nurse_name: string | null;
   ended_at: string;
 }
 
@@ -89,4 +90,31 @@ export interface CallRow {
   room_id: string;
   ticket: string;
   called_at: string;
+}
+
+/** Result row shape of get_provider_stats / get_nurse_stats RPCs. */
+export interface StaffStatRow {
+  provider_name?: string;
+  nurse_name?: string;
+  visits: number;
+  avg_ms: number;
+  p50_ms: number;
+  p90_ms: number;
+}
+
+/** Result row shape of get_stage_percentiles. */
+export interface StagePercentileRow {
+  stage: Stage;
+  n: number;
+  avg_ms: number;
+  p50_ms: number;
+  p90_ms: number;
+}
+
+/** Result row shape of get_room_utilization. */
+export interface RoomUtilizationRow {
+  room_id: string;
+  room_name: string;
+  stage: Stage;
+  total_ms: number;
 }

@@ -59,7 +59,7 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
       .select("*")
       .eq("clinic_id", clinicId)
       .order("day_date", { ascending: false })
-      .limit(60);
+      .limit(3660); // ~10 years of days — cheap since each row is tiny, and the All-time tab needs full history
     const rows = (data as ClinicDay[]) ?? [];
     setToday(rows.find((d) => d.day_date === todayStr) ?? null);
     setPastDays(rows.filter((d) => d.day_date !== todayStr));
