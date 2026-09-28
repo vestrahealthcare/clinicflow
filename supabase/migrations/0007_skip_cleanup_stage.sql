@@ -112,3 +112,20 @@ begin
   where clinic_id = p_clinic_id and day_date = v_today;
 end;
 $$;
+
+-- ------------------------------------------------------- doctor idle reset --
+-- Doctor idle time is calculated live from with_doctor room_history rows —
+-- the same rows behind "Avg doctor in room" and visit counts — so resetting
+-- it can't mean deleting that data without also wiping those. Instead this
+-- is just a per-clinic cutoff: the idle-time calculation only counts gaps
+-- between visits that happened after idle_reset_at. Nothing is deleted, so
+-- there's nothing to undo — the same reasoning as the two-step confirms
+-- on the history resets doesn't apply here, this just needs one warning.
+alter table clinics add column if not exists idle_reset_at timestamptz;
+
+create or replace function reset_doctor_idle(p_clinic_id uuid)
+returns void language plpgsql as $$
+begin
+  update clinics set idle_reset_at = now() where id = p_clinic_id;
+end;
+$$;

@@ -18,6 +18,7 @@ interface ClinicActions {
   markProviderFinished: (roomId: string) => Promise<ActionResult>;
   setStaffing: (roomId: string, nurseId: string | null, doctorId: string | null) => Promise<void>;
   setRoomCount: (count: number) => Promise<void>;
+  resetDoctorIdle: () => Promise<ActionResult>;
   addStaff: (role: StaffRole) => Promise<string | null>; // returns an error message, or null on success
   renameStaff: (staffId: string, name: string) => Promise<void>;
   removeStaff: (staffId: string) => Promise<ActionResult>;
@@ -437,6 +438,13 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
     [clinic]
   );
 
+  const resetDoctorIdle = useCallback(async (): Promise<ActionResult> => {
+    if (!clinic) return { ok: false, error: "No clinic loaded." };
+    const res = await rpc("reset_doctor_idle", { p_clinic_id: clinic.id });
+    if (res.ok) setClinic({ ...clinic, idle_reset_at: new Date().toISOString() });
+    return res;
+  }, [clinic]);
+
   // Up to MAX_STAFF_PER_ROLE providers and MAX_STAFF_PER_ROLE nurses. Returns
   // an error message string on failure (e.g. cap reached), null on success.
   const addStaff = useCallback(
@@ -594,6 +602,7 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
       markProviderFinished,
       setStaffing,
       setRoomCount,
+      resetDoctorIdle,
       addStaff,
       renameStaff,
       removeStaff,

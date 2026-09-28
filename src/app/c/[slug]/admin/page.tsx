@@ -18,6 +18,7 @@ type AdminTab = "live" | "days" | "weeks" | "months" | "alltime";
 export default function AdminPage() {
   const { clinic, rooms, staff, history, today, pastDays, avgByStage, countByStage, actions } = useClinic();
   const [tab, setTab] = useState<AdminTab>("live");
+  const [idleResetConfirm, setIdleResetConfirm] = useState(false);
   const roomNameById = useMemo(() => Object.fromEntries(rooms.map((r) => [r.id, r.name])), [rooms]);
   // Today counts toward All-time totals once it's actually been closed out
   // (total_visits only gets computed by End Day) — until then it's still
@@ -34,7 +35,14 @@ export default function AdminPage() {
   // counts agree for any historical day that went through both stages).
   const roomVisits = (roomId: string) => history.filter((h) => h.room_id === roomId && h.stage === "with_doctor").length;
 
-  const idleByProvider = useMemo(() => computeDoctorIdleTime(history), [history]);
+  // Resetting idle time doesn't delete any history (that would also wipe
+  // "Avg doctor in room" and visit counts, which come from the same rows) —
+  // it just moves the cutoff forward so only later gaps count.
+  const idleByProvider = useMemo(() => {
+    const cutoff = clinic?.idle_reset_at;
+    const input = cutoff ? history.filter((h) => h.ended_at >= cutoff) : history;
+    return computeDoctorIdleTime(input);
+  }, [history, clinic?.idle_reset_at]);
 
   const overdueCount = rooms.filter(isOverdue).length;
   const lockoutCount = rooms.filter((r) => r.contaminated).length;
@@ -172,12 +180,48 @@ export default function AdminPage() {
           </div>
 
           <div className="card p-5 mb-6">
-            <h3 className="font-bold mb-1">Doctor idle time</h3>
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+              <h3 className="font-bold">Doctor idle time</h3>
+              <button
+                className="text-xs font-semibold text-red-600 border border-red-300 dark:border-red-800 rounded-lg px-2.5 py-1"
+                onClick={() => setIdleResetConfirm(true)}
+              >
+                Reset idle time
+              </button>
+            </div>
             <p className="text-sm text-slate-500 mb-3">
               Actual gaps between a provider&apos;s visits, not an estimate. Counted only within the same day, so an
               overnight or weekend gap never counts as idle time. Rooms staffed as &quot;Any provider&quot; are not
               attributed to anyone here.
+              {clinic!.idle_reset_at && ` Reset at ${formatClockTime(clinic!.idle_reset_at)}.`}
             </p>
+            {idleResetConfirm && (
+              <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950 text-red-800 dark:text-red-200 mb-3">
+                <p className="text-sm font-semibold mb-1">Reset doctor idle time?</p>
+                <p className="text-xs mb-3">
+                  This only affects the idle-time numbers below — it doesn&apos;t delete any visit history, and
+                  &quot;Avg doctor in room&quot; and visit counts elsewhere are unaffected. Gaps before right now will
+                  no longer count; only gaps between visits from this point forward will.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    className="flex-1 py-2 rounded-lg border border-red-400 font-bold text-sm"
+                    onClick={() => setIdleResetConfirm(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="flex-1 py-2 rounded-lg bg-red-700 text-white font-bold text-sm"
+                    onClick={async () => {
+                      await actions.resetDoctorIdle();
+                      setIdleResetConfirm(false);
+                    }}
+                  >
+                    Yes, reset
+                  </button>
+                </div>
+              </div>
+            )}
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-slate-500 text-xs">

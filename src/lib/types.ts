@@ -23,6 +23,9 @@ export interface Clinic {
   name: string;
   room_count: number;
   next_ticket_num: number;
+  /** Doctor idle time only counts gaps between visits after this point —
+   *  resetting it doesn't delete any data, just moves this cutoff forward. */
+  idle_reset_at: string | null;
 }
 
 export interface RequestFlags {

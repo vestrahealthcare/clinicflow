@@ -3,7 +3,7 @@ import { Stage } from "./types";
 export const STAGE_LABEL: Record<Stage, string> = {
   vacant: "Vacant",
   ready_for_nurse: "Ready for nurse",
-  prepping: "Prepping",
+  prepping: "Nurse in room",
   ready_for_doctor: "Ready for doctor",
   with_doctor: "Doctor in room",
   needs_cleanup: "Needs cleanup"
