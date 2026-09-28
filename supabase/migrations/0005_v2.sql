@@ -25,9 +25,20 @@ create index if not exists idx_room_requests_room on room_requests(room_id);
 create index if not exists idx_room_requests_clinic on room_requests(clinic_id, created_at desc);
 
 alter table room_requests enable row level security;
+drop policy if exists "public read room_requests" on room_requests;
 create policy "public read room_requests" on room_requests for select using (true);
+drop policy if exists "public write room_requests" on room_requests;
 create policy "public write room_requests" on room_requests for all using (true) with check (true);
-alter publication supabase_realtime add table room_requests;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'room_requests'
+  ) then
+    alter publication supabase_realtime add table room_requests;
+  end if;
+end $$;
 
 -- Idempotent: calling this when an active (uncleared) request for the same
 -- room+key already exists just returns that existing request's id, so the
@@ -81,9 +92,20 @@ create table if not exists huddle_posts (
 create index if not exists idx_huddle_clinic on huddle_posts(clinic_id, created_at desc);
 
 alter table huddle_posts enable row level security;
+drop policy if exists "public read huddle_posts" on huddle_posts;
 create policy "public read huddle_posts" on huddle_posts for select using (true);
+drop policy if exists "public write huddle_posts" on huddle_posts;
 create policy "public write huddle_posts" on huddle_posts for all using (true) with check (true);
-alter publication supabase_realtime add table huddle_posts;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'huddle_posts'
+  ) then
+    alter publication supabase_realtime add table huddle_posts;
+  end if;
+end $$;
 
 -- --------------------------------------------------------- patient identity --
 -- patient_label persists across a vacancy on purpose (the opposite of
@@ -111,6 +133,10 @@ $$;
 -- shown on other rooms in this clinic (not all-time history — a patient from
 -- three weeks ago sharing initials doesn't matter, only what's visibly on
 -- the board right now), e.g. "JS" -> "JS-2" -> "JS-3".
+-- Gains a second parameter here, which Postgres treats as a different
+-- function signature (not just a body change) — drop the old 1-arg
+-- version first so it doesn't linger as an unused overload.
+drop function if exists assign_patient(uuid);
 create or replace function assign_patient(p_room_id uuid, p_label text default null)
 returns text language plpgsql as $$
 declare
@@ -168,6 +194,10 @@ $$;
 -- Returns the new room_history row's id (was void) so Undo can delete
 -- exactly that row if the stage advance gets undone. patient_label is
 -- deliberately left out of the vacant-transition reset list.
+-- Postgres refuses to change a function's return type via CREATE OR
+-- REPLACE (must drop it first) — this is the "cannot change return type"
+-- error the first attempt at this migration hit.
+drop function if exists advance_room_stage(uuid);
 create or replace function advance_room_stage(p_room_id uuid)
 returns uuid language plpgsql as $$
 declare
