@@ -17,6 +17,10 @@ export default function AdminPage() {
   const { clinic, rooms, staff, history, today, pastDays, avgByStage, countByStage, actions } = useClinic();
   const [tab, setTab] = useState<AdminTab>("live");
   const roomNameById = useMemo(() => Object.fromEntries(rooms.map((r) => [r.id, r.name])), [rooms]);
+  // Today counts toward All-time totals once it's actually been closed out
+  // (total_visits only gets computed by End Day) — until then it's still
+  // "in progress" and stays out of the cumulative numbers.
+  const allDays = today?.closed_at ? [...pastDays, today] : pastDays;
 
   const roomAvg = (roomId: string, stage: Stage) => {
     const items = history.filter((h) => h.room_id === roomId && h.stage === stage);
@@ -273,7 +277,7 @@ export default function AdminPage() {
 
       {tab === "days" && <DayHistoryPanel clinicId={clinic.id} days={pastDays} roomNameById={roomNameById} />}
 
-      {tab === "alltime" && <AllTimePanel clinicId={clinic.id} allDays={pastDays} rooms={rooms} />}
+      {tab === "alltime" && <AllTimePanel clinicId={clinic.id} allDays={allDays} rooms={rooms} />}
     </div>
   );
 }
