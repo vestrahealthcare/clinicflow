@@ -109,10 +109,6 @@ export function personLabel(
   return d ? `Doctor: ${d.name}` : "Doctor needed";
 }
 
-export function hasUrgentRequest(room: Room, urgentKeys: string[]): boolean {
-  return urgentKeys.some((k) => !!room.requests?.[k]) || room.contaminated;
-}
-
 /**
  * Picks readable body text (near-white or near-black) for a solid fill color,
  * via the standard YIQ brightness split. Needed now that board tiles fill

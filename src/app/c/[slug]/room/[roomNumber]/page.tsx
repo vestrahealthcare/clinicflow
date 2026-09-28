@@ -3,13 +3,18 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useClinic } from "@/lib/clinicContext";
+import { useUndo } from "@/lib/undoContext";
+import { supabase } from "@/lib/supabaseClient";
 import { LiveTimer } from "@/components/LiveTimer";
-import { STAGE_LABEL, ACTION_LABEL, REQUEST_GROUPS } from "@/lib/constants";
-import { isOverdue, roomOccupancyColor, personLabel, contrastText } from "@/lib/util";
+import { STAGE_LABEL, ACTION_LABEL, REQUEST_GROUPS, REQUEST_LABEL, STAFF_NAME_KEY } from "@/lib/constants";
+import { isOverdue, roomOccupancyColor, personLabel, contrastText, formatClockTime } from "@/lib/util";
+import { Room, RoomRequest } from "@/lib/types";
 
 export default function RoomPage({ params }: { params: { slug: string; roomNumber: string } }) {
-  const { rooms, staffById, today, avgByStage, countByStage, actions } = useClinic();
+  const { rooms, staffById, today, activeRequestsByRoom, avgByStage, countByStage, actions } = useClinic();
+  const { showUndo } = useUndo();
   const [noteDraft, setNoteDraft] = useState<Record<string, string>>({});
+  const [departConfirmOpen, setDepartConfirmOpen] = useState(false);
 
   const roomNumber = parseInt(params.roomNumber, 10);
   const room = rooms.find((r) => r.room_number === roomNumber);
@@ -22,11 +27,81 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
   const label = personLabel(room, staffById);
   const overdue = isOverdue(room);
   const side = room.side === "left" ? "Left" : "Right";
+  const activeReqs = activeRequestsByRoom[room.id] ?? {};
+  const outstanding = Object.values(activeReqs);
+
+  function getStaffName(): string {
+    try {
+      return localStorage.getItem(STAFF_NAME_KEY) ?? "";
+    } catch {
+      return "";
+    }
+  }
 
   function sendNote() {
     const text = noteDraft[room!.id] ?? room!.note ?? "";
     actions.setNote(room!.id, text);
     if (text.trim()) actions.toggleFlash(room!.id, true);
+  }
+
+  async function requestChipClick(key: string) {
+    const existing = activeReqs[key];
+    if (!existing) {
+      await actions.createRequest(room!.id, key);
+      return;
+    }
+    const res = await actions.clearRequest(existing.id);
+    if (res.ok) {
+      showUndo(`${REQUEST_LABEL[key] ?? key} cleared.`, () => actions.restoreRequest(existing.id));
+    }
+  }
+
+  async function claimRequest(req: RoomRequest) {
+    let name = getStaffName();
+    if (!name) {
+      name = window.prompt("Your name, so others know who's got this:") ?? "";
+      if (name) {
+        try {
+          localStorage.setItem(STAFF_NAME_KEY, name);
+        } catch {
+          // Ignore — just won't be remembered next time.
+        }
+      }
+    }
+    if (name.trim()) await actions.acknowledgeRequest(req.id, name.trim());
+  }
+
+  async function advanceWithUndo() {
+    const snapshot: Partial<Room> = {
+      stage: room!.stage,
+      stage_started_at: room!.stage_started_at,
+      ticket: room!.ticket,
+      note: room!.note,
+      requests: room!.requests,
+      flashing: room!.flashing,
+      provider_finished_at: room!.provider_finished_at
+    };
+    const beforeUpdatedAt = room!.updated_at;
+    const res = await actions.advanceStage(room!.id);
+    if (!res.ok) return;
+    const { data: fresh } = await supabase.from("rooms").select("updated_at").eq("id", room!.id).single();
+    const afterUpdatedAt = fresh?.updated_at ?? beforeUpdatedAt;
+    showUndo(`${STAGE_LABEL[snapshot.stage!]} step done.`, () =>
+      actions.restoreRoomSnapshot(room!.id, snapshot, afterUpdatedAt, res.historyId)
+    );
+  }
+
+  async function handlePatientDepartedClick() {
+    if (outstanding.length > 0) {
+      setDepartConfirmOpen(true);
+      return;
+    }
+    await advanceWithUndo();
+  }
+
+  async function handOffAndDepart() {
+    setDepartConfirmOpen(false);
+    await advanceWithUndo();
   }
 
   return (
@@ -60,7 +135,7 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
           <h2 className="text-2xl font-bold mb-1">{room.name}</h2>
           <div className="text-sm mb-4" style={{ opacity: 0.85 }}>
             {side} side
-            {room.ticket ? ` · Ticket ${room.ticket}` : ""}
+            {room.patient_label ? ` · ${room.patient_label}` : ""}
             {label ? ` · ${label}` : ""}
           </div>
 
@@ -94,84 +169,157 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
         </div>
 
         <div className="p-6">
-        <div className="text-xs text-slate-500 mb-2">Next step</div>
-        {room.contaminated ? (
-          <>
-            <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 font-semibold mb-3">
-              Deep clean required before this room can be used
-            </div>
-            <button
-              className="w-full py-4 rounded-xl bg-red-700 text-white font-bold"
-              onClick={() => actions.setLockout(room.id, false)}
-            >
-              Clear lockout, room cleaned
-            </button>
-          </>
-        ) : room.stage === "vacant" ? (
-          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900 text-slate-500 text-sm text-center">
-            Waiting for front desk to assign a patient.
-          </div>
-        ) : (
-          <button
-            className="w-full py-4 rounded-xl bg-blue-600 text-white font-bold text-lg"
-            onClick={() => actions.advanceStage(room.id)}
-          >
-            {ACTION_LABEL[room.stage]} →
-          </button>
-        )}
-
-        {!room.contaminated && (
-          <>
-            {REQUEST_GROUPS.map((g) => (
-              <div key={g.title}>
-                <div className="text-xs text-slate-500 mt-5 mb-2">{g.title}</div>
-                <div className="flex flex-wrap gap-2">
-                  {g.items.map((d) => (
-                    <button
-                      key={d.key}
-                      className={`chip ${room.requests?.[d.key] ? "on" : ""}`}
-                      onClick={() => actions.toggleRequest(room.id, d.key)}
-                    >
-                      {d.label}
-                      {room.requests?.[d.key] ? " ✓" : ""}
-                    </button>
-                  ))}
-                </div>
+          <div className="text-xs text-slate-500 mb-2">Next step</div>
+          {room.contaminated ? (
+            <>
+              <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 font-semibold mb-3">
+                Deep clean required before this room can be used
               </div>
-            ))}
-
-            <div className="text-xs text-slate-500 mt-5 mb-2">Message a teammate</div>
-            <div className="flex gap-2">
-              <input
-                className="flex-1 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2.5 text-sm bg-slate-50 dark:bg-slate-900"
-                placeholder="e.g. running behind, hold my next patient"
-                value={noteDraft[room.id] ?? room.note ?? ""}
-                onChange={(e) => setNoteDraft({ ...noteDraft, [room.id]: e.target.value })}
-              />
               <button
-                className="bg-slate-900 dark:bg-white dark:text-slate-900 text-white font-semibold px-4 rounded-lg"
-                onClick={sendNote}
+                className="w-full py-4 rounded-xl bg-red-700 text-white font-bold"
+                onClick={() => actions.setLockout(room.id, false)}
               >
-                Send
+                Clear lockout, room cleaned
+              </button>
+            </>
+          ) : room.stage === "vacant" ? (
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900 text-slate-500 text-sm text-center">
+              Waiting for front desk to assign a patient.
+            </div>
+          ) : room.stage === "with_doctor" ? (
+            <div className="space-y-2">
+              {room.provider_finished_at ? (
+                <div className="text-sm font-semibold text-emerald-700 dark:text-emerald-400 px-1">
+                  Provider finished at {formatClockTime(room.provider_finished_at)}
+                </div>
+              ) : (
+                <button
+                  className="w-full py-3 rounded-xl border border-slate-300 dark:border-slate-600 font-bold"
+                  onClick={() => actions.markProviderFinished(room.id)}
+                >
+                  Provider finished
+                </button>
+              )}
+
+              {departConfirmOpen && (
+                <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-200">
+                  <div className="font-semibold text-sm mb-2">These tasks are still open:</div>
+                  <ul className="text-sm mb-3 list-disc pl-5">
+                    {outstanding.map((r) => (
+                      <li key={r.id}>
+                        {REQUEST_LABEL[r.key] ?? r.key}
+                        {r.acknowledged_by ? ` — claimed by ${r.acknowledged_by}` : " — unclaimed"}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-xs mb-3">
+                    They&apos;ll stay open on Needs Attention for someone to finish — departing doesn&apos;t delete them.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      className="flex-1 py-2.5 rounded-lg border border-amber-600 font-bold text-sm"
+                      onClick={() => setDepartConfirmOpen(false)}
+                    >
+                      Go back
+                    </button>
+                    <button
+                      className="flex-1 py-2.5 rounded-lg bg-amber-600 text-white font-bold text-sm"
+                      onClick={handOffAndDepart}
+                    >
+                      Hand off and depart anyway
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <button
+                className="w-full py-4 rounded-xl bg-blue-600 text-white font-bold text-lg"
+                onClick={handlePatientDepartedClick}
+              >
+                Patient departed →
               </button>
             </div>
-            {room.note && (
-              <div className="mt-2 text-sm bg-slate-50 dark:bg-slate-900 rounded-lg px-3 py-2 flex justify-between gap-2">
-                <span>&ldquo;{room.note}&rdquo;</span>
-                <button className="text-slate-400" onClick={() => actions.setNote(room.id, null)}>
-                  Clear
+          ) : (
+            <button
+              className="w-full py-4 rounded-xl bg-blue-600 text-white font-bold text-lg"
+              onClick={advanceWithUndo}
+            >
+              {ACTION_LABEL[room.stage]} →
+            </button>
+          )}
+
+          {!room.contaminated && (
+            <>
+              {REQUEST_GROUPS.map((g) => (
+                <div key={g.title}>
+                  <div className="text-xs text-slate-500 mt-5 mb-2">{g.title}</div>
+                  <div className="flex flex-wrap gap-2">
+                    {g.items.map((d) => {
+                      const req = activeReqs[d.key];
+                      if (!req) {
+                        return (
+                          <button key={d.key} className="chip" onClick={() => requestChipClick(d.key)}>
+                            {d.label}
+                          </button>
+                        );
+                      }
+                      if (!req.acknowledged_at) {
+                        return (
+                          <span key={d.key} className="chip on flex items-center gap-2">
+                            <button onClick={() => requestChipClick(d.key)}>{d.label} ✕</button>
+                            <button className="underline font-semibold" onClick={() => claimRequest(req)}>
+                              I&apos;ve got it
+                            </button>
+                          </span>
+                        );
+                      }
+                      return (
+                        <button
+                          key={d.key}
+                          className="chip on"
+                          title={`Claimed by ${req.acknowledged_by}`}
+                          onClick={() => requestChipClick(d.key)}
+                        >
+                          {d.label} — {req.acknowledged_by} ✓
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+
+              <div className="text-xs text-slate-500 mt-5 mb-2">Message a teammate</div>
+              <div className="flex gap-2">
+                <input
+                  className="flex-1 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2.5 text-sm bg-slate-50 dark:bg-slate-900"
+                  placeholder="e.g. running behind, hold my next patient"
+                  value={noteDraft[room.id] ?? room.note ?? ""}
+                  onChange={(e) => setNoteDraft({ ...noteDraft, [room.id]: e.target.value })}
+                />
+                <button
+                  className="bg-slate-900 dark:bg-white dark:text-slate-900 text-white font-semibold px-4 rounded-lg"
+                  onClick={sendNote}
+                >
+                  Send
                 </button>
               </div>
-            )}
+              {room.note && (
+                <div className="mt-2 text-sm bg-slate-50 dark:bg-slate-900 rounded-lg px-3 py-2 flex justify-between gap-2">
+                  <span>&ldquo;{room.note}&rdquo;</span>
+                  <button className="text-slate-400" onClick={() => actions.setNote(room.id, null)}>
+                    Clear
+                  </button>
+                </div>
+              )}
 
-            <button
-              className="w-full mt-4 py-3 rounded-xl border border-red-700 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 font-bold text-sm"
-              onClick={() => actions.setLockout(room.id, true)}
-            >
-              Contamination lockout
-            </button>
-          </>
-        )}
+              <button
+                className="w-full mt-4 py-3 rounded-xl border border-red-700 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 font-bold text-sm"
+                onClick={() => actions.setLockout(room.id, true)}
+              >
+                Contamination lockout
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

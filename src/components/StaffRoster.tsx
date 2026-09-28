@@ -8,7 +8,7 @@ interface Props {
   staff: Staff[];
   onAdd: (role: StaffRole) => Promise<string | null>;
   onRename: (id: string, name: string) => Promise<void>;
-  onRemove: (id: string) => Promise<void>;
+  onRemove: (id: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 function RoleColumn({
@@ -42,22 +42,28 @@ function RoleColumn({
       </div>
       <div className="space-y-2">
         {people.map((p) => (
-          <div key={p.id} className="flex items-center gap-2">
-            <input
-              className="flex-1 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 rounded-lg px-2.5 py-1.5 text-sm"
-              defaultValue={p.name}
-              onBlur={(e) => {
-                const v = e.target.value.trim();
-                if (v && v !== p.name) onRename(p.id, v);
-              }}
-            />
-            <button
-              className="text-slate-400 hover:text-red-600 text-sm px-1"
-              title={`Remove ${p.name}`}
-              onClick={() => onRemove(p.id)}
-            >
-              ✕
-            </button>
+          <div key={p.id}>
+            <div className="flex items-center gap-2">
+              <input
+                className="flex-1 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 rounded-lg px-2.5 py-1.5 text-sm"
+                defaultValue={p.name}
+                onBlur={(e) => {
+                  const v = e.target.value.trim();
+                  if (v && v !== p.name) onRename(p.id, v);
+                }}
+              />
+              <button
+                className="text-slate-400 hover:text-red-600 text-sm px-1"
+                title={`Remove ${p.name}`}
+                onClick={async () => {
+                  setError(null);
+                  const res = await onRemove(p.id);
+                  if (!res.ok) setError(res.error ?? `Couldn't remove ${p.name}.`);
+                }}
+              >
+                ✕
+              </button>
+            </div>
           </div>
         ))}
       </div>

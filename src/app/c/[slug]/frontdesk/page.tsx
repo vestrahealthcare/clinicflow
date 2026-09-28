@@ -9,7 +9,8 @@ import { STAGE_LABEL } from "@/lib/constants";
 export default function FrontDeskPage() {
   const { rooms, staff, today, actions, avgByStage, countByStage } = useClinic();
   const dayOpen = !!today?.opened_at && !today?.closed_at;
-  const [lastAssigned, setLastAssigned] = useState<{ roomId: string; ticket: string } | null>(null);
+  const [lastAssigned, setLastAssigned] = useState<{ roomId: string; label: string | null } | null>(null);
+  const [labelDraft, setLabelDraft] = useState<Record<string, string>>({});
 
   const vacant = rooms.filter((r) => r.stage === "vacant" && !r.contaminated);
   const busy = rooms.filter((r) => !(r.stage === "vacant" && !r.contaminated));
@@ -17,8 +18,12 @@ export default function FrontDeskPage() {
   const doctors = staff.filter((s) => s.role === "doctor");
 
   async function checkIn(roomId: string) {
-    const ticket = await actions.assignPatient(roomId);
-    if (ticket) setLastAssigned({ roomId, ticket });
+    const label = (labelDraft[roomId] ?? "").trim() || null;
+    const res = await actions.assignPatient(roomId, label);
+    if (res.ok && res.ticket) {
+      setLastAssigned({ roomId, label });
+      setLabelDraft((d) => ({ ...d, [roomId]: "" }));
+    }
   }
 
   const lastRoom = lastAssigned ? rooms.find((r) => r.id === lastAssigned.roomId) : null;
@@ -29,7 +34,7 @@ export default function FrontDeskPage() {
         <div className="card p-4 mb-5 bg-emerald-50 dark:bg-emerald-950 border-emerald-500 flex items-center justify-between gap-3 flex-wrap">
           <span className="font-semibold text-emerald-700 dark:text-emerald-300">
             Tell the patient: {lastRoom.name}, {lastRoom.side === "left" ? "Left" : "Right"} side
-            {" "}(Ticket {lastAssigned?.ticket})
+            {lastRoom.patient_label ? ` (${lastRoom.patient_label})` : ""}
           </span>
           <button className="text-emerald-700 dark:text-emerald-300 font-semibold" onClick={() => setLastAssigned(null)}>
             Got it
@@ -39,7 +44,7 @@ export default function FrontDeskPage() {
 
       <Legend />
 
-      <div className="text-xs text-slate-500 mb-2">Vacant rooms. Tap to check in the next patient.</div>
+      <div className="text-xs text-slate-500 mb-2">Vacant rooms. Enter initials, then check in the next patient.</div>
       <div className="grid gap-3 mb-8" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))" }}>
         {vacant.map((r) => {
           return (
@@ -48,6 +53,12 @@ export default function FrontDeskPage() {
               <div className="text-xs text-slate-500 mb-3">
                 {r.side === "left" ? "Left" : "Right"} side &middot; Vacant
               </div>
+              <input
+                className="w-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 rounded-lg px-2.5 py-1.5 text-sm mb-2"
+                placeholder="Initials (e.g. JS)"
+                value={labelDraft[r.id] ?? ""}
+                onChange={(e) => setLabelDraft((d) => ({ ...d, [r.id]: e.target.value }))}
+              />
               <button
                 className="w-full bg-emerald-600 text-white font-bold py-2.5 rounded-lg"
                 onClick={() => checkIn(r.id)}
@@ -67,7 +78,7 @@ export default function FrontDeskPage() {
             <tr className="text-left text-slate-500 text-xs">
               <th className="pb-2">Room</th>
               <th className="pb-2">Status</th>
-              <th className="pb-2">Ticket</th>
+              <th className="pb-2">Patient</th>
               <th className="pb-2">Time in step</th>
             </tr>
           </thead>
@@ -76,7 +87,17 @@ export default function FrontDeskPage() {
               <tr key={r.id} className="border-t border-slate-100 dark:border-slate-700">
                 <td className="py-2">{r.name}</td>
                 <td className="py-2">{r.contaminated ? "Contamination lockout" : STAGE_LABEL[r.stage]}</td>
-                <td className="py-2">{r.ticket ?? "—"}</td>
+                <td className="py-2">
+                  <input
+                    className="border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 rounded-md text-sm px-2 py-1 w-28"
+                    defaultValue={r.patient_label ?? ""}
+                    placeholder="—"
+                    onBlur={(e) => {
+                      const v = e.target.value.trim();
+                      if (v !== (r.patient_label ?? "")) actions.setPatientLabel(r.id, v || null);
+                    }}
+                  />
+                </td>
                 <td className="py-2">
                   {r.contaminated ? (
                     "—"

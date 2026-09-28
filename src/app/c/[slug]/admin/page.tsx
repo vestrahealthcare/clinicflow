@@ -6,12 +6,14 @@ import { LiveTimer } from "@/components/LiveTimer";
 import { Legend } from "@/components/Legend";
 import { StaffRoster } from "@/components/StaffRoster";
 import { DayHistoryPanel } from "@/components/admin/DayHistoryPanel";
+import { WeekHistoryPanel } from "@/components/admin/WeekHistoryPanel";
+import { MonthHistoryPanel } from "@/components/admin/MonthHistoryPanel";
 import { AllTimePanel } from "@/components/admin/AllTimePanel";
 import { STAGE_LABEL, STAGE_ORDER, THRESH_MIN, SCHEDULED_DAY_START, SCHEDULED_DAY_END } from "@/lib/constants";
 import { formatMinutes, isOverdue, computeDoctorIdleTime, formatClockTime, formatSqlTime } from "@/lib/util";
 import { Stage } from "@/lib/types";
 
-type AdminTab = "live" | "days" | "alltime";
+type AdminTab = "live" | "days" | "weeks" | "months" | "alltime";
 
 export default function AdminPage() {
   const { clinic, rooms, staff, history, today, pastDays, avgByStage, countByStage, actions } = useClinic();
@@ -103,6 +105,8 @@ export default function AdminPage() {
           [
             ["live", "Live"],
             ["days", "Day history"],
+            ["weeks", "Weekly history"],
+            ["months", "Monthly history"],
             ["alltime", "All-time"]
           ] as [AdminTab, string][]
         ).map(([key, label]) => (
@@ -276,6 +280,10 @@ export default function AdminPage() {
       )}
 
       {tab === "days" && <DayHistoryPanel clinicId={clinic.id} days={pastDays} roomNameById={roomNameById} />}
+
+      {tab === "weeks" && <WeekHistoryPanel clinicId={clinic.id} roomNameById={roomNameById} />}
+
+      {tab === "months" && <MonthHistoryPanel clinicId={clinic.id} roomNameById={roomNameById} />}
 
       {tab === "alltime" && <AllTimePanel clinicId={clinic.id} allDays={allDays} rooms={rooms} />}
     </div>

@@ -56,7 +56,7 @@ export default function WaitingPage() {
           if (!room) return null;
           return (
             <div key={c.id} className="card px-7 py-5 flex justify-between items-center">
-              <span className="font-mono text-2xl font-semibold">{c.ticket}</span>
+              <span className="font-mono text-2xl font-semibold">{room.patient_label ?? c.ticket}</span>
               <span className="text-xl font-semibold flex items-center">{room.name}</span>
             </div>
           );

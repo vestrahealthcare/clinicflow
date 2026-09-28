@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ClinicProvider, useClinic } from "@/lib/clinicContext";
+import { UndoProvider } from "@/lib/undoContext";
+import { ConnectionBadge } from "@/components/ConnectionBadge";
 
 function TopNav({ slug }: { slug: string }) {
   const { clinic } = useClinic();
@@ -12,6 +14,7 @@ function TopNav({ slug }: { slug: string }) {
     { href: `/c/${slug}/board`, label: "Fishbowl board", match: "/board" },
     { href: `/c/${slug}/frontdesk`, label: "Front desk", match: "/frontdesk" },
     { href: `/c/${slug}/waiting`, label: "Waiting room", match: "/waiting" },
+    { href: `/c/${slug}/huddle`, label: "Huddle", match: "/huddle" },
     { href: `/c/${slug}/admin`, label: "Admin", match: "/admin" }
   ];
   return (
@@ -19,6 +22,7 @@ function TopNav({ slug }: { slug: string }) {
       <div className="flex items-baseline gap-2">
         <span className="font-bold text-lg">ClinicFlow</span>
         <span className="text-sm text-slate-500">{clinic?.name ?? slug}</span>
+        <ConnectionBadge />
       </div>
       <nav className="flex bg-slate-100 dark:bg-slate-900 rounded-lg p-1 gap-0.5 flex-wrap">
         {tabs.map((t) => (
@@ -60,7 +64,9 @@ export default function ClinicLayout({
 }) {
   return (
     <ClinicProvider slug={params.slug}>
-      <ClinicShell slug={params.slug}>{children}</ClinicShell>
+      <UndoProvider>
+        <ClinicShell slug={params.slug}>{children}</ClinicShell>
+      </UndoProvider>
     </ClinicProvider>
   );
 }

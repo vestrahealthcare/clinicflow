@@ -94,7 +94,12 @@ export const REQUEST_GROUPS: { title: string; items: RequestDef[] }[] = [
       { key: "chaperone", label: "Chaperone" },
       { key: "ecg", label: "ECG" },
       { key: "vitals", label: "Vitals" },
-      { key: "nextPatient", label: "Next patient in" }
+      { key: "lab", label: "Lab" },
+      { key: "injection", label: "Injection" },
+      { key: "dietitian", label: "Dietitian" },
+      { key: "careManagement", label: "Care Management" },
+      { key: "referral", label: "Referral" },
+      { key: "imaging", label: "Imaging" }
     ]
   }
 ];
@@ -103,5 +108,7 @@ export const REQUEST_LABEL: Record<string, string> = Object.fromEntries(
   REQUEST_GROUPS.flatMap((g) => g.items.map((i) => [i.key, i.label]))
 );
 
-// Urgent flags that should flash on the central board (per Nick: flash, no sound).
-export const URGENT_REQUEST_KEYS = ["chaperone", "nurse"];
+// No login system — this is just a per-device convenience so the same
+// tablet/staff member doesn't retype their name every time they post to the
+// huddle board or claim a request.
+export const STAFF_NAME_KEY = "clinicflow_staff_name";

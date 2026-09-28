@@ -54,7 +54,35 @@ export interface Room {
   note: string | null;
   requests: RequestFlags;
   flashing: boolean;
+  /** Patient identifier (initials, etc). Persists across a vacancy on
+   *  purpose — only replaced when the next patient is assigned. */
+  patient_label: string | null;
+  provider_finished_at: string | null;
   updated_at: string;
+}
+
+/** One trackable/claimable request instance — replaces the old boolean
+ *  `Room.requests` flags. "Active" = cleared_at null. "Unclaimed" = active
+ *  and acknowledged_at null (this is what keeps a room flashing). */
+export interface RoomRequest {
+  id: string;
+  clinic_id: string;
+  room_id: string;
+  key: string;
+  created_at: string;
+  acknowledged_by: string | null;
+  acknowledged_at: string | null;
+  cleared_at: string | null;
+}
+
+export interface HuddlePost {
+  id: string;
+  clinic_id: string;
+  author: string;
+  body: string;
+  category: "today" | "week";
+  pinned: boolean;
+  created_at: string;
 }
 
 export interface ClinicDay {

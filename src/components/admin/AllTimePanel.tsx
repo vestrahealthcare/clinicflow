@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import { ClinicDay, StaffStatRow, RoomUtilizationRow, Room, Stage } from "@/lib/types";
+import { ClinicDay, Room, Stage } from "@/lib/types";
 import { STAGE_LABEL } from "@/lib/constants";
-import { formatMinutes, toCsv, downloadCsv, utilizationBucket } from "@/lib/util";
+import { formatMinutes, toCsv, downloadCsv } from "@/lib/util";
+import { PeriodDetailPanel } from "./PeriodDetailPanel";
 
 interface Props {
   clinicId: string;
@@ -53,34 +54,10 @@ function bucketByWeek(days: ClinicDay[]): WeekBucket[] {
 }
 
 export function AllTimePanel({ clinicId, allDays, rooms }: Props) {
-  const [providers, setProviders] = useState<StaffStatRow[]>([]);
-  const [nurses, setNurses] = useState<StaffStatRow[]>([]);
-  const [utilization, setUtilization] = useState<RoomUtilizationRow[]>([]);
-  const [loading, setLoading] = useState(true);
   const [rangeStart, setRangeStart] = useState("");
   const [rangeEnd, setRangeEnd] = useState("");
   const [exporting, setExporting] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      setLoading(true);
-      const [{ data: p }, { data: n }, { data: u }] = await Promise.all([
-        supabase.rpc("get_provider_stats", { p_clinic_id: clinicId }),
-        supabase.rpc("get_nurse_stats", { p_clinic_id: clinicId }),
-        supabase.rpc("get_room_utilization", { p_clinic_id: clinicId })
-      ]);
-      if (cancelled) return;
-      setProviders((p as StaffStatRow[]) ?? []);
-      setNurses((n as StaffStatRow[]) ?? []);
-      setUtilization((u as RoomUtilizationRow[]) ?? []);
-      setLoading(false);
-    }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [clinicId]);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const totalVisits = allDays.reduce((a, d) => a + (d.total_visits ?? 0), 0);
   const daysOperated = allDays.filter((d) => d.opened_at).length;
@@ -93,16 +70,6 @@ export function AllTimePanel({ clinicId, allDays, rooms }: Props) {
   const maxWeeklyVisits = Math.max(...weeks.map((w) => w.visits), 1);
   const thisWeek = weeks[weeks.length - 1];
   const lastWeek = weeks[weeks.length - 2];
-
-  const utilByRoom = useMemo(() => {
-    const map: Record<string, { room_name: string; Vacant: number; Occupied: number; "Needs cleanup": number }> = {};
-    utilization.forEach((row) => {
-      const bucket = utilizationBucket(row.stage);
-      map[row.room_id] ||= { room_name: row.room_name, Vacant: 0, Occupied: 0, "Needs cleanup": 0 };
-      map[row.room_id][bucket] += row.total_ms;
-    });
-    return Object.values(map);
-  }, [utilization]);
 
   function weekStageAvg(w: WeekBucket | undefined, stage: Stage): number | null {
     const b = w?.daySums[stage];
@@ -134,6 +101,8 @@ export function AllTimePanel({ clinicId, allDays, rooms }: Props) {
     downloadCsv(`clinicflow_${rangeStart}_to_${rangeEnd}.csv`, toCsv(rows));
     setExporting(false);
   }
+
+  const roomNameById = Object.fromEntries(rooms.map((r) => [r.id, r.name]));
 
   return (
     <div>
@@ -209,106 +178,8 @@ export function AllTimePanel({ clinicId, allDays, rooms }: Props) {
         </div>
       )}
 
-      <div className="grid gap-5 sm:grid-cols-2 mb-5">
-        <div className="card p-5">
-          <h3 className="font-bold mb-3">Providers, all-time</h3>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-slate-500 text-xs">
-                <th className="pb-2">Name</th>
-                <th className="pb-2">Visits</th>
-                <th className="pb-2">Avg</th>
-                <th className="pb-2">p90</th>
-              </tr>
-            </thead>
-            <tbody>
-              {providers.map((p) => (
-                <tr key={p.provider_name} className="border-t border-slate-100 dark:border-slate-700">
-                  <td className="py-2">{p.provider_name}</td>
-                  <td className="py-2 font-mono">{p.visits}</td>
-                  <td className="py-2 font-mono">{formatMinutes(p.avg_ms)}</td>
-                  <td className="py-2 font-mono">{formatMinutes(p.p90_ms)}</td>
-                </tr>
-              ))}
-              {!loading && providers.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="py-2 text-slate-400">
-                    No completed visits yet
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        <div className="card p-5">
-          <h3 className="font-bold mb-3">Nurses, all-time</h3>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-slate-500 text-xs">
-                <th className="pb-2">Name</th>
-                <th className="pb-2">Preps</th>
-                <th className="pb-2">Avg</th>
-                <th className="pb-2">p90</th>
-              </tr>
-            </thead>
-            <tbody>
-              {nurses.map((n) => (
-                <tr key={n.nurse_name} className="border-t border-slate-100 dark:border-slate-700">
-                  <td className="py-2">{n.nurse_name}</td>
-                  <td className="py-2 font-mono">{n.visits}</td>
-                  <td className="py-2 font-mono">{formatMinutes(n.avg_ms)}</td>
-                  <td className="py-2 font-mono">{formatMinutes(n.p90_ms)}</td>
-                </tr>
-              ))}
-              {!loading && nurses.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="py-2 text-slate-400">
-                    No preps logged since nurse tracking was added
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
       <div className="card p-5 mb-5">
-        <h3 className="font-bold mb-1">Room utilization, all-time</h3>
-        <p className="text-sm text-slate-500 mb-3">
-          How each room&apos;s tracked time splits between sitting vacant, occupied by a visit, and awaiting cleanup.
-          Vacant time only counts from when tracking for it was added, so early totals may look low.
-        </p>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-slate-500 text-xs">
-              <th className="pb-2">Room</th>
-              <th className="pb-2">Vacant</th>
-              <th className="pb-2">Occupied</th>
-              <th className="pb-2">Needs cleanup</th>
-            </tr>
-          </thead>
-          <tbody>
-            {utilByRoom.map((r) => (
-              <tr key={r.room_name} className="border-t border-slate-100 dark:border-slate-700">
-                <td className="py-2">{r.room_name}</td>
-                <td className="py-2 font-mono">{formatMinutes(r.Vacant)}</td>
-                <td className="py-2 font-mono">{formatMinutes(r.Occupied)}</td>
-                <td className="py-2 font-mono">{formatMinutes(r["Needs cleanup"])}</td>
-              </tr>
-            ))}
-            {!loading && utilByRoom.length === 0 && (
-              <tr>
-                <td colSpan={4} className="py-2 text-slate-400">
-                  No room activity logged yet
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="card p-5">
-        <h3 className="font-bold mb-3">Export a date range</h3>
+        <h3 className="font-bold mb-3">Export any date range</h3>
         <div className="flex items-end gap-3 flex-wrap">
           <div>
             <div className="text-xs text-slate-500 mb-1">From</div>
@@ -336,6 +207,20 @@ export function AllTimePanel({ clinicId, allDays, rooms }: Props) {
             {exporting ? "Exporting…" : "Export CSV"}
           </button>
         </div>
+      </div>
+
+      <div className="card p-5">
+        <h3 className="font-bold mb-3">All-time breakdown</h3>
+        <PeriodDetailPanel
+          key={refreshKey}
+          clinicId={clinicId}
+          since={null}
+          until={null}
+          rangeLabel="all-time"
+          roomNameById={roomNameById}
+          csvFilename="clinicflow_all_time.csv"
+          onReset={() => setRefreshKey((k) => k + 1)}
+        />
       </div>
     </div>
   );
