@@ -29,13 +29,16 @@ export default function AdminPage() {
     if (!items.length) return null;
     return items.reduce((a, h) => a + h.duration_ms, 0) / items.length;
   };
-  const roomVisits = (roomId: string) => history.filter((h) => h.room_id === roomId && h.stage === "needs_cleanup").length;
+  // "Completed visits" counts with_doctor rows — the terminal stage before
+  // vacant now that the cleanup step is skipped (was needs_cleanup; both
+  // counts agree for any historical day that went through both stages).
+  const roomVisits = (roomId: string) => history.filter((h) => h.room_id === roomId && h.stage === "with_doctor").length;
 
   const idleByProvider = useMemo(() => computeDoctorIdleTime(history), [history]);
 
   const overdueCount = rooms.filter(isOverdue).length;
   const lockoutCount = rooms.filter((r) => r.contaminated).length;
-  const totalVisits = history.filter((h) => h.stage === "needs_cleanup").length;
+  const totalVisits = history.filter((h) => h.stage === "with_doctor").length;
   const maxAvg = Math.max(...STAGE_ORDER.map((s) => avgByStage[s] ?? 0), 1);
   const bottleneck = STAGE_ORDER.reduce<Stage | null>(
     (best, s) => (!best || (avgByStage[s] ?? 0) > (avgByStage[best] ?? 0) ? s : best),

@@ -11,11 +11,14 @@ export const STAGE_LABEL: Record<Stage, string> = {
 
 // Stage the room-tablet's big button advances to, and its label. Vacant has
 // none: only the front desk can move a room out of vacant (assign_patient).
+// with_doctor -> vacant directly: the cleanup step is skipped on the live
+// floor now (needs_cleanup -> vacant only still matters for any room that
+// was already mid-cleanup before that change shipped).
 export const NEXT_STAGE: Partial<Record<Stage, Stage>> = {
   ready_for_nurse: "prepping",
   prepping: "ready_for_doctor",
   ready_for_doctor: "with_doctor",
-  with_doctor: "needs_cleanup",
+  with_doctor: "vacant",
   needs_cleanup: "vacant"
 };
 
