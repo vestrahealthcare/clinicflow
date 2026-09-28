@@ -14,6 +14,7 @@ function startOfMonth(d: Date): Date {
 
 export function MonthHistoryPanel({ clinicId, roomNameById }: Props) {
   const [monthStart, setMonthStart] = useState(() => startOfMonth(new Date()));
+  const [refreshKey, setRefreshKey] = useState(0);
   const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
   const label = monthStart.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 
@@ -35,12 +36,14 @@ export function MonthHistoryPanel({ clinicId, roomNameById }: Props) {
         </div>
       </div>
       <PeriodDetailPanel
+        key={refreshKey}
         clinicId={clinicId}
         since={monthStart.toISOString()}
         until={monthEnd.toISOString()}
         rangeLabel={label}
         roomNameById={roomNameById}
         csvFilename={`clinicflow_${monthStart.toISOString().slice(0, 7)}.csv`}
+        onReset={() => setRefreshKey((k) => k + 1)}
       />
     </div>
   );

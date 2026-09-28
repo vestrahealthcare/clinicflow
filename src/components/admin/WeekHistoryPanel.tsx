@@ -19,6 +19,7 @@ function mondayOf(d: Date): Date {
 
 export function WeekHistoryPanel({ clinicId, roomNameById }: Props) {
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekEnd.getDate() + 7);
@@ -51,12 +52,14 @@ export function WeekHistoryPanel({ clinicId, roomNameById }: Props) {
         </div>
       </div>
       <PeriodDetailPanel
+        key={refreshKey}
         clinicId={clinicId}
         since={weekStart.toISOString()}
         until={weekEnd.toISOString()}
         rangeLabel={`the week of ${label}`}
         roomNameById={roomNameById}
         csvFilename={`clinicflow_week_${weekStart.toISOString().slice(0, 10)}.csv`}
+        onReset={() => setRefreshKey((k) => k + 1)}
       />
     </div>
   );
