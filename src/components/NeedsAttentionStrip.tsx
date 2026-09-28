@@ -9,6 +9,8 @@ import { isOverdue } from "@/lib/util";
 export function NeedsAttentionStrip() {
   const { rooms, roomRequests, actions } = useClinic();
   const [claimingId, setClaimingId] = useState<string | null>(null);
+  const [askingNameFor, setAskingNameFor] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState("");
 
   const roomNameById = Object.fromEntries(rooms.map((r) => [r.id, r.name]));
 
@@ -17,26 +19,43 @@ export function NeedsAttentionStrip() {
 
   if (unclaimed.length === 0 && longWaits.length === 0) return null;
 
-  async function claim(requestId: string) {
-    setClaimingId(requestId);
-    let name = "";
+  function storedName(): string {
     try {
-      name = localStorage.getItem(STAFF_NAME_KEY) ?? "";
+      return localStorage.getItem(STAFF_NAME_KEY) ?? "";
     } catch {
-      // Ignore — fall back to prompting.
+      return "";
     }
-    if (!name) {
-      name = window.prompt("Your name, so others know who's got this:") ?? "";
-      if (name) {
-        try {
-          localStorage.setItem(STAFF_NAME_KEY, name);
-        } catch {
-          // Ignore — just won't be remembered next time.
-        }
-      }
+  }
+
+  function remember(name: string) {
+    try {
+      localStorage.setItem(STAFF_NAME_KEY, name);
+    } catch {
+      // Ignore — just won't be remembered next time.
     }
-    if (name.trim()) await actions.acknowledgeRequest(requestId, name.trim());
+  }
+
+  async function claimAs(requestId: string, name: string) {
+    setClaimingId(requestId);
+    await actions.acknowledgeRequest(requestId, name.trim());
     setClaimingId(null);
+    setAskingNameFor(null);
+  }
+
+  function startClaim(requestId: string) {
+    const name = storedName();
+    if (name) {
+      claimAs(requestId, name);
+    } else {
+      setNameDraft("");
+      setAskingNameFor(requestId);
+    }
+  }
+
+  function confirmNamedClaim(requestId: string) {
+    if (!nameDraft.trim()) return;
+    remember(nameDraft.trim());
+    claimAs(requestId, nameDraft.trim());
   }
 
   return (
@@ -50,18 +69,40 @@ export function NeedsAttentionStrip() {
           >
             <div className="font-bold text-sm">{roomNameById[r.room_id] ?? "Room"}</div>
             <div className="text-xs text-slate-500">{REQUEST_LABEL[r.key] ?? r.key}</div>
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-mono text-sm">
-                <LiveTimer startedAt={r.created_at} />
-              </span>
-              <button
-                className="text-xs font-semibold bg-slate-900 dark:bg-white dark:text-slate-900 text-white px-2 py-1 rounded-md disabled:opacity-50"
-                onClick={() => claim(r.id)}
-                disabled={claimingId === r.id}
-              >
-                I&apos;ve got it
-              </button>
-            </div>
+            {askingNameFor === r.id ? (
+              <div className="flex items-center gap-1 mt-1">
+                <input
+                  autoFocus
+                  className="w-20 min-w-0 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 rounded-md px-2 py-1 text-xs"
+                  placeholder="Your name"
+                  value={nameDraft}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") confirmNamedClaim(r.id);
+                  }}
+                />
+                <button
+                  className="text-xs font-semibold bg-slate-900 dark:bg-white dark:text-slate-900 text-white px-2 py-1 rounded-md disabled:opacity-50"
+                  onClick={() => confirmNamedClaim(r.id)}
+                  disabled={!nameDraft.trim() || claimingId === r.id}
+                >
+                  Claim
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono text-sm">
+                  <LiveTimer startedAt={r.created_at} />
+                </span>
+                <button
+                  className="text-xs font-semibold bg-slate-900 dark:bg-white dark:text-slate-900 text-white px-2 py-1 rounded-md disabled:opacity-50"
+                  onClick={() => startClaim(r.id)}
+                  disabled={claimingId === r.id}
+                >
+                  I&apos;ve got it
+                </button>
+              </div>
+            )}
           </div>
         ))}
         {longWaits.map((r) => (

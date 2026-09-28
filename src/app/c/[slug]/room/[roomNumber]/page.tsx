@@ -15,6 +15,8 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
   const { showUndo } = useUndo();
   const [noteDraft, setNoteDraft] = useState<Record<string, string>>({});
   const [departConfirmOpen, setDepartConfirmOpen] = useState(false);
+  const [askingNameForKey, setAskingNameForKey] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState("");
 
   const roomNumber = parseInt(params.roomNumber, 10);
   const room = rooms.find((r) => r.room_number === roomNumber);
@@ -56,19 +58,29 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
     }
   }
 
-  async function claimRequest(req: RoomRequest) {
-    let name = getStaffName();
-    if (!name) {
-      name = window.prompt("Your name, so others know who's got this:") ?? "";
-      if (name) {
-        try {
-          localStorage.setItem(STAFF_NAME_KEY, name);
-        } catch {
-          // Ignore — just won't be remembered next time.
-        }
-      }
+  function rememberStaffName(name: string) {
+    try {
+      localStorage.setItem(STAFF_NAME_KEY, name);
+    } catch {
+      // Ignore — just won't be remembered next time.
     }
-    if (name.trim()) await actions.acknowledgeRequest(req.id, name.trim());
+  }
+
+  async function claimRequest(req: RoomRequest) {
+    const name = getStaffName();
+    if (name) {
+      await actions.acknowledgeRequest(req.id, name);
+    } else {
+      setNameDraft("");
+      setAskingNameForKey(req.key);
+    }
+  }
+
+  async function confirmNamedClaim(req: RoomRequest) {
+    if (!nameDraft.trim()) return;
+    rememberStaffName(nameDraft.trim());
+    await actions.acknowledgeRequest(req.id, nameDraft.trim());
+    setAskingNameForKey(null);
   }
 
   async function advanceWithUndo() {
@@ -264,6 +276,32 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
                         );
                       }
                       if (!req.acknowledged_at) {
+                        if (askingNameForKey === d.key) {
+                          return (
+                            <span key={d.key} className="chip on flex items-center gap-1.5">
+                              <input
+                                autoFocus
+                                className="w-20 min-w-0 border-none bg-white/20 rounded px-1.5 py-0.5 text-xs placeholder:text-current"
+                                placeholder="Your name"
+                                value={nameDraft}
+                                onChange={(e) => setNameDraft(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") confirmNamedClaim(req);
+                                }}
+                              />
+                              <button
+                                className="font-semibold disabled:opacity-50"
+                                onClick={() => confirmNamedClaim(req)}
+                                disabled={!nameDraft.trim()}
+                              >
+                                Claim
+                              </button>
+                              <button className="opacity-70" onClick={() => setAskingNameForKey(null)}>
+                                ✕
+                              </button>
+                            </span>
+                          );
+                        }
                         return (
                           <span key={d.key} className="chip on flex items-center gap-2">
                             <button onClick={() => requestChipClick(d.key)}>{d.label} ✕</button>
