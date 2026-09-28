@@ -6,12 +6,13 @@ import { useClinic } from "@/lib/clinicContext";
 import { useUndo } from "@/lib/undoContext";
 import { supabase } from "@/lib/supabaseClient";
 import { LiveTimer } from "@/components/LiveTimer";
-import { STAGE_LABEL, ACTION_LABEL, REQUEST_GROUPS, REQUEST_LABEL, STAFF_NAME_KEY } from "@/lib/constants";
+import { STAGE_LABEL, ACTION_LABEL, REQUEST_GROUPS, REQUEST_LABEL } from "@/lib/constants";
 import { isOverdue, roomOccupancyColor, personLabel, contrastText, formatClockTime } from "@/lib/util";
 import { Room, RoomRequest } from "@/lib/types";
 
 export default function RoomPage({ params }: { params: { slug: string; roomNumber: string } }) {
-  const { rooms, staffById, today, activeRequestsByRoom, avgByStage, countByStage, actions } = useClinic();
+  const { rooms, staffById, today, activeRequestsByRoom, avgByStage, countByStage, actions, staffName, setStaffName } =
+    useClinic();
   const { showUndo } = useUndo();
   const [noteDraft, setNoteDraft] = useState<Record<string, string>>({});
   const [departConfirmOpen, setDepartConfirmOpen] = useState(false);
@@ -32,14 +33,6 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
   const activeReqs = activeRequestsByRoom[room.id] ?? {};
   const outstanding = Object.values(activeReqs);
 
-  function getStaffName(): string {
-    try {
-      return localStorage.getItem(STAFF_NAME_KEY) ?? "";
-    } catch {
-      return "";
-    }
-  }
-
   function sendNote() {
     const text = noteDraft[room!.id] ?? room!.note ?? "";
     actions.setNote(room!.id, text);
@@ -58,18 +51,9 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
     }
   }
 
-  function rememberStaffName(name: string) {
-    try {
-      localStorage.setItem(STAFF_NAME_KEY, name);
-    } catch {
-      // Ignore — just won't be remembered next time.
-    }
-  }
-
   async function claimRequest(req: RoomRequest) {
-    const name = getStaffName();
-    if (name) {
-      await actions.acknowledgeRequest(req.id, name);
+    if (staffName) {
+      await actions.acknowledgeRequest(req.id, staffName);
     } else {
       setNameDraft("");
       setAskingNameForKey(req.key);
@@ -78,7 +62,7 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
 
   async function confirmNamedClaim(req: RoomRequest) {
     if (!nameDraft.trim()) return;
-    rememberStaffName(nameDraft.trim());
+    setStaffName(nameDraft.trim());
     await actions.acknowledgeRequest(req.id, nameDraft.trim());
     setAskingNameForKey(null);
   }
@@ -303,7 +287,11 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
                           );
                         }
                         return (
-                          <span key={d.key} className="chip on flex items-center gap-2">
+                          <span
+                            key={d.key}
+                            className="chip on flex items-center gap-2"
+                            title={req.created_by ? `Ordered by ${req.created_by}` : undefined}
+                          >
                             <button onClick={() => requestChipClick(d.key)}>{d.label} ✕</button>
                             <button className="underline font-semibold" onClick={() => claimRequest(req)}>
                               I&apos;ve got it
@@ -315,7 +303,7 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
                         <button
                           key={d.key}
                           className="chip on"
-                          title={`Claimed by ${req.acknowledged_by}`}
+                          title={req.created_by ? `Ordered by ${req.created_by}` : undefined}
                           onClick={() => requestChipClick(d.key)}
                         >
                           {d.label} — {req.acknowledged_by} ✓
@@ -343,7 +331,10 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
               </div>
               {room.note && (
                 <div className="mt-2 text-sm bg-slate-50 dark:bg-slate-900 rounded-lg px-3 py-2 flex justify-between gap-2">
-                  <span>&ldquo;{room.note}&rdquo;</span>
+                  <span>
+                    &ldquo;{room.note}&rdquo;
+                    {room.note_author && <span className="text-slate-400"> — {room.note_author}</span>}
+                  </span>
                   <button className="text-slate-400" onClick={() => actions.setNote(room.id, null)}>
                     Clear
                   </button>

@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { supabase } from "./supabaseClient";
 import { Clinic, Staff, Room, RoomHistoryRow, RoomRequest, Stage, StaffRole, ClinicDay } from "./types";
-import { STAGE_ORDER, AVG_WINDOW_DAYS, MAX_STAFF_PER_ROLE, ROLE_COLOR } from "./constants";
+import { STAGE_ORDER, AVG_WINDOW_DAYS, MAX_STAFF_PER_ROLE, ROLE_COLOR, STAFF_NAME_KEY } from "./constants";
 
 export type ActionResult = { ok: boolean; error?: string };
 
@@ -55,6 +55,11 @@ interface ClinicContextValue {
   error: string | null;
   connected: boolean;
   lastUpdatedAt: string | null;
+  /** Per-device "who's using this tablet" name — no login system, so this is
+   *  the only identity there is. Persisted to localStorage; attached to
+   *  requests created, requests claimed, and notes sent. */
+  staffName: string;
+  setStaffName: (name: string) => void;
   actions: ClinicActions;
 }
 
@@ -73,6 +78,28 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
   const [connected, setConnected] = useState(true);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
   const connectedRef = useRef(true);
+  const [staffNameState, setStaffNameState] = useState("");
+  const staffNameRef = useRef("");
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(STAFF_NAME_KEY) ?? "";
+      staffNameRef.current = stored;
+      setStaffNameState(stored);
+    } catch {
+      // Private browsing / blocked storage — just start blank.
+    }
+  }, []);
+
+  const setStaffName = useCallback((name: string) => {
+    staffNameRef.current = name;
+    setStaffNameState(name);
+    try {
+      localStorage.setItem(STAFF_NAME_KEY, name);
+    } catch {
+      // Ignore — just won't be remembered next time.
+    }
+  }, []);
 
   const bumpUpdated = useCallback(() => setLastUpdatedAt(new Date().toISOString()), []);
 
@@ -374,7 +401,7 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
   }, []);
 
   const setNote = useCallback(async (roomId: string, note: string | null) => {
-    await rpc("set_room_note", { p_room_id: roomId, p_note: note ?? "" });
+    await rpc("set_room_note", { p_room_id: roomId, p_note: note ?? "", p_author: staffNameRef.current });
   }, []);
 
   const assignPatient = useCallback(async (roomId: string, label?: string | null) => {
@@ -470,7 +497,11 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
   }, [clinic, loadDays]);
 
   const createRequest = useCallback(async (roomId: string, key: string) => {
-    const res = await rpc<string | null>("create_room_request", { p_room_id: roomId, p_key: key });
+    const res = await rpc<string | null>("create_room_request", {
+      p_room_id: roomId,
+      p_key: key,
+      p_created_by: staffNameRef.current
+    });
     return { ...res, requestId: res.data ?? null };
   }, []);
 
@@ -552,6 +583,8 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
     error,
     connected,
     lastUpdatedAt,
+    staffName: staffNameState,
+    setStaffName,
     actions: {
       advanceStage,
       setLockout,

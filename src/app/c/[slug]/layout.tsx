@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { ClinicProvider, useClinic } from "@/lib/clinicContext";
 import { UndoProvider } from "@/lib/undoContext";
 import { ConnectionBadge } from "@/components/ConnectionBadge";
+import { StaffIdentityBadge } from "@/components/StaffIdentityBadge";
 
 function TopNav({ slug }: { slug: string }) {
   const { clinic } = useClinic();
@@ -24,21 +25,24 @@ function TopNav({ slug }: { slug: string }) {
         <span className="text-sm text-slate-500">{clinic?.name ?? slug}</span>
         <ConnectionBadge />
       </div>
-      <nav className="flex bg-slate-100 dark:bg-slate-900 rounded-lg p-1 gap-0.5 flex-wrap">
-        {tabs.map((t) => (
-          <Link
-            key={t.href}
-            href={t.href}
-            className={`px-3 py-2 rounded-md text-sm font-semibold ${
-              pathname?.includes(t.match)
-                ? "bg-white dark:bg-slate-700 shadow-sm"
-                : "text-slate-500"
-            }`}
-          >
-            {t.label}
-          </Link>
-        ))}
-      </nav>
+      <div className="flex items-center gap-3 flex-wrap">
+        <nav className="flex bg-slate-100 dark:bg-slate-900 rounded-lg p-1 gap-0.5 flex-wrap">
+          {tabs.map((t) => (
+            <Link
+              key={t.href}
+              href={t.href}
+              className={`px-3 py-2 rounded-md text-sm font-semibold ${
+                pathname?.includes(t.match)
+                  ? "bg-white dark:bg-slate-700 shadow-sm"
+                  : "text-slate-500"
+              }`}
+            >
+              {t.label}
+            </Link>
+          ))}
+        </nav>
+        <StaffIdentityBadge />
+      </div>
     </header>
   );
 }

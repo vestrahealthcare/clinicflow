@@ -52,6 +52,7 @@ export interface Room {
   assigned_doctor_id: string | null;
   ticket: string | null;
   note: string | null;
+  note_author: string | null;
   requests: RequestFlags;
   flashing: boolean;
   /** Patient identifier (initials, etc). Persists across a vacancy on
@@ -70,6 +71,7 @@ export interface RoomRequest {
   room_id: string;
   key: string;
   created_at: string;
+  created_by: string | null;
   acknowledged_by: string | null;
   acknowledged_at: string | null;
   cleared_at: string | null;

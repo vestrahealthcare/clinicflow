@@ -3,11 +3,11 @@
 import { useState } from "react";
 import { useClinic } from "@/lib/clinicContext";
 import { LiveTimer } from "@/components/LiveTimer";
-import { REQUEST_LABEL, STAGE_LABEL, STAFF_NAME_KEY } from "@/lib/constants";
+import { REQUEST_LABEL, STAGE_LABEL } from "@/lib/constants";
 import { isOverdue } from "@/lib/util";
 
 export function NeedsAttentionStrip() {
-  const { rooms, roomRequests, actions } = useClinic();
+  const { rooms, roomRequests, actions, staffName, setStaffName } = useClinic();
   const [claimingId, setClaimingId] = useState<string | null>(null);
   const [askingNameFor, setAskingNameFor] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState("");
@@ -19,22 +19,6 @@ export function NeedsAttentionStrip() {
 
   if (unclaimed.length === 0 && longWaits.length === 0) return null;
 
-  function storedName(): string {
-    try {
-      return localStorage.getItem(STAFF_NAME_KEY) ?? "";
-    } catch {
-      return "";
-    }
-  }
-
-  function remember(name: string) {
-    try {
-      localStorage.setItem(STAFF_NAME_KEY, name);
-    } catch {
-      // Ignore — just won't be remembered next time.
-    }
-  }
-
   async function claimAs(requestId: string, name: string) {
     setClaimingId(requestId);
     await actions.acknowledgeRequest(requestId, name.trim());
@@ -43,9 +27,8 @@ export function NeedsAttentionStrip() {
   }
 
   function startClaim(requestId: string) {
-    const name = storedName();
-    if (name) {
-      claimAs(requestId, name);
+    if (staffName) {
+      claimAs(requestId, staffName);
     } else {
       setNameDraft("");
       setAskingNameFor(requestId);
@@ -54,7 +37,7 @@ export function NeedsAttentionStrip() {
 
   function confirmNamedClaim(requestId: string) {
     if (!nameDraft.trim()) return;
-    remember(nameDraft.trim());
+    setStaffName(nameDraft.trim());
     claimAs(requestId, nameDraft.trim());
   }
 
@@ -68,7 +51,10 @@ export function NeedsAttentionStrip() {
             className="shrink-0 card p-3 border-l-4 border-red-600 min-w-[190px] flex flex-col gap-1"
           >
             <div className="font-bold text-sm">{roomNameById[r.room_id] ?? "Room"}</div>
-            <div className="text-xs text-slate-500">{REQUEST_LABEL[r.key] ?? r.key}</div>
+            <div className="text-xs text-slate-500">
+              {REQUEST_LABEL[r.key] ?? r.key}
+              {r.created_by ? ` · ${r.created_by}` : ""}
+            </div>
             {askingNameFor === r.id ? (
               <div className="flex items-center gap-1 mt-1">
                 <input

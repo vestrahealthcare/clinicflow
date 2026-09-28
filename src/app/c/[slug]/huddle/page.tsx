@@ -5,23 +5,13 @@ import { useClinic } from "@/lib/clinicContext";
 import { supabase } from "@/lib/supabaseClient";
 import { HuddlePost } from "@/lib/types";
 import { formatClockTime } from "@/lib/util";
-import { STAFF_NAME_KEY } from "@/lib/constants";
 
 export default function HuddlePage() {
-  const { clinic } = useClinic();
+  const { clinic, staffName, setStaffName } = useClinic();
   const [posts, setPosts] = useState<HuddlePost[]>([]);
-  const [author, setAuthor] = useState("");
   const [body, setBody] = useState("");
   const [category, setCategory] = useState<"today" | "week">("today");
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    try {
-      setAuthor(localStorage.getItem(STAFF_NAME_KEY) ?? "");
-    } catch {
-      // Private browsing / blocked storage — just start blank.
-    }
-  }, []);
 
   useEffect(() => {
     if (!clinic) return;
@@ -61,19 +51,10 @@ export default function HuddlePage() {
     };
   }, [clinic?.id]);
 
-  function rememberAuthor(name: string) {
-    setAuthor(name);
-    try {
-      localStorage.setItem(STAFF_NAME_KEY, name);
-    } catch {
-      // Ignore — just won't be remembered next time.
-    }
-  }
-
   async function submitPost() {
     if (!clinic) return;
     setError(null);
-    const trimmedAuthor = author.trim();
+    const trimmedAuthor = staffName.trim();
     const trimmedBody = body.trim();
     if (!trimmedAuthor || !trimmedBody) {
       setError("Enter your name and a message.");
@@ -151,8 +132,8 @@ export default function HuddlePage() {
           <input
             className="border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 rounded-lg px-3 py-2 text-sm"
             placeholder="Your name"
-            value={author}
-            onChange={(e) => rememberAuthor(e.target.value)}
+            value={staffName}
+            onChange={(e) => setStaffName(e.target.value)}
           />
           <select
             className="border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 rounded-lg px-3 py-2 text-sm"
