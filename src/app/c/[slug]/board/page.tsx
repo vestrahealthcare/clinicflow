@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useClinic } from "@/lib/clinicContext";
 import { LiveTimer } from "@/components/LiveTimer";
 import { Legend } from "@/components/Legend";
@@ -7,7 +8,7 @@ import { NeedsAttentionStrip } from "@/components/NeedsAttentionStrip";
 import { STAGE_LABEL, REQUEST_LABEL } from "@/lib/constants";
 import { isOverdue, personColor, personLabel, contrastText } from "@/lib/util";
 
-export default function BoardPage() {
+export default function BoardPage({ params }: { params: { slug: string } }) {
   const { rooms, staffById, activeRequestsByRoom, unclaimedRoomIds, today, avgByStage, countByStage } = useClinic();
   const dayOpen = !!today?.opened_at && !today?.closed_at;
 
@@ -26,9 +27,10 @@ export default function BoardPage() {
           const label = personLabel(room, staffById);
 
           return (
-            <div
+            <Link
               key={room.id}
-              className={`card p-4 ${urgent ? "flash-urgent" : ""} ${
+              href={`/c/${params.slug}/room/${room.room_number}`}
+              className={`card p-4 block cursor-pointer ${urgent ? "flash-urgent" : ""} ${
                 (room.flashing || unclaimed) && !urgent ? "flash-box" : ""
               } ${overdue && !urgent ? "ring-2 ring-red-500" : ""}`}
               style={{ backgroundColor: color, color: text }}
@@ -73,7 +75,7 @@ export default function BoardPage() {
                   &ldquo;{room.note}&rdquo;
                 </div>
               )}
-            </div>
+            </Link>
           );
         })}
       </div>
