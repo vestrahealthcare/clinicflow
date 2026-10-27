@@ -4,21 +4,32 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useClinic } from "@/lib/clinicContext";
 import { LiveTimer } from "@/components/LiveTimer";
+import { ClaimPicker } from "@/components/ClaimPicker";
 import {
   STAGE_LABEL,
   ACTION_LABEL,
   REQUEST_GROUPS,
   REQUEST_LABEL,
   TEST_KEYS,
-  LAB_PICKUP_KEYS
+  LAB_PICKUP_KEYS,
+  FOLLOWUP_TIMEFRAMES,
+  FOLLOWUP_REASONS,
+  FOLLOWUP_TIMEFRAME_LABEL,
+  FOLLOWUP_REASON_LABEL
 } from "@/lib/constants";
-import { isOverdue, personColor, personLabel } from "@/lib/util";
+import { FollowupReason, FollowupTimeframe } from "@/lib/types";
+import { attentionItems, isOverdue, needsAttention, personColor, personLabel, roomDirections } from "@/lib/util";
 
 export default function RoomPage({ params }: { params: { slug: string; roomNumber: string } }) {
   const { rooms, hallways, staffById, avgByStage, countByStage, actions } = useClinic();
   const [noteDraft, setNoteDraft] = useState<Record<string, string>>({});
   // Shown when the patient is leaving but rapid/molecular tests are still marked on the room.
   const [askCallbackFor, setAskCallbackFor] = useState<string | null>(null);
+  // Which "I've got it" item is picking a name, and the follow up form.
+  const [claiming, setClaiming] = useState<string | null>(null);
+  const [followupOpenFor, setFollowupOpenFor] = useState<string | null>(null);
+  const [fuTimeframe, setFuTimeframe] = useState<FollowupTimeframe | null>(null);
+  const [fuReason, setFuReason] = useState<FollowupReason | null>(null);
 
   const roomNumber = parseInt(params.roomNumber, 10);
   const room = rooms.find((r) => r.room_number === roomNumber);
@@ -31,25 +42,37 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
       </div>
     );
 
+  const color = personColor(room);
+  const label = personLabel(room, staffById);
+  const overdue = isOverdue(room);
+  const items = attentionItems(room);
+  const flashing = needsAttention(room);
+
   const pendingTests = TEST_KEYS.filter((k) => room.requests?.[k]);
   const labOn = LAB_PICKUP_KEYS.filter((k) => room.requests?.[k]);
   const inVisit = room.stage === "with_doctor" || room.stage === "shots" || room.stage === "other";
 
-  // "Pt departed": if tests are still marked, ask once whether to add the patient
-  // to the Call with results list before the room moves to cleanup.
-  const departNow = (addCallback: boolean) => {
+  // Check-out: if tests are still marked, ask once whether to add the patient to the
+  // Call with results list. The patient then goes back to the waiting room list.
+  const checkOutNow = (addCallback: boolean) => {
     setAskCallbackFor(null);
-    actions.advanceStage(room.id, { target: "needs_cleanup", expected: room.stage, addCallback });
+    actions.checkOut(room.id, { expected: room.stage, addCallback });
   };
-  const onDepart = () => {
+  const onCheckOut = () => {
     if (pendingTests.length > 0) setAskCallbackFor(room.id);
-    else departNow(false);
+    else checkOutNow(false);
   };
 
-  const color = personColor(room);
-  const label = personLabel(room, staffById);
-  const overdue = isOverdue(room);
-  const side = room.side === "left" ? "Left" : "Right";
+  const openFollowup = () => {
+    setFuTimeframe(room.followup?.timeframe ?? null);
+    setFuReason(room.followup?.reason ?? null);
+    setFollowupOpenFor(room.id);
+  };
+  const saveFollowup = () => {
+    if (!fuTimeframe || !fuReason) return;
+    actions.setFollowup(room.id, fuTimeframe, fuReason);
+    setFollowupOpenFor(null);
+  };
 
   return (
     <div>
@@ -69,11 +92,18 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
         })}
       </div>
 
-      <div className={`card p-6 max-w-xl ${overdue ? "border-red-400" : ""} ${room.contaminated ? "border-red-700" : ""}`}>
-        <h2 className="text-2xl font-bold mb-1">{room.name}</h2>
+      <div
+        className={`card p-6 max-w-xl ${overdue ? "border-red-400" : ""} ${room.contaminated ? "border-red-700" : ""} ${
+          flashing && !room.contaminated ? "flash-urgent border-red-700" : ""
+        }`}
+      >
+        <h2 className="text-2xl font-bold mb-1">
+          {room.name}
+          {room.initials ? <span className="ml-3 font-mono text-xl text-slate-500">{room.initials}</span> : null}
+        </h2>
         <div className="text-sm text-slate-500 mb-4">
           <span className="hall-dot" style={{ backgroundColor: hallway?.color ?? "#999" }} />
-          {hallway?.label ?? "Hallway"} &middot; {side} side
+          {roomDirections(room, hallway)}
           {room.ticket ? ` · Ticket ${room.ticket}` : ""}
           {label ? ` · ${label}` : ""}
         </div>
@@ -132,13 +162,13 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
             <div className="flex gap-2">
               <button
                 className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-bold"
-                onClick={() => departNow(true)}
+                onClick={() => checkOutNow(true)}
               >
                 Yes, call with results
               </button>
               <button
                 className="flex-1 py-3 rounded-xl border border-slate-300 dark:border-slate-600 font-bold"
-                onClick={() => departNow(false)}
+                onClick={() => checkOutNow(false)}
               >
                 No
               </button>
@@ -163,12 +193,12 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
                 Other
               </button>
             </div>
-            <button className="w-full py-4 rounded-xl bg-blue-600 text-white font-bold text-lg" onClick={onDepart}>
+            <button className="w-full py-4 rounded-xl bg-blue-600 text-white font-bold text-lg" onClick={onCheckOut}>
               {ACTION_LABEL.with_doctor} →
             </button>
           </>
         ) : room.stage === "shots" || room.stage === "other" ? (
-          <button className="w-full py-4 rounded-xl bg-blue-600 text-white font-bold text-lg" onClick={onDepart}>
+          <button className="w-full py-4 rounded-xl bg-blue-600 text-white font-bold text-lg" onClick={onCheckOut}>
             {ACTION_LABEL[room.stage]} →
           </button>
         ) : (
@@ -178,6 +208,48 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
           >
             {ACTION_LABEL[room.stage]} →
           </button>
+        )}
+
+        {!room.contaminated && items.length > 0 && (
+          <div className="mt-5">
+            <div className="text-xs text-slate-500 mb-2">Needs attention</div>
+            <div className="space-y-2">
+              {items.map((it) => (
+                <div key={it.key} className="rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="font-semibold text-sm">{it.label}</span>
+                    {it.claimedBy ? (
+                      <span className="flex items-center gap-2 text-sm">
+                        <span className="text-emerald-700 dark:text-emerald-400 font-semibold">{it.claimedBy} has it</span>
+                        <button
+                          className="text-xs text-slate-400"
+                          onClick={() => actions.claim(room.id, it.key, "")}
+                        >
+                          Undo
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-semibold text-sm"
+                        onClick={() => setClaiming(`${room.id}:${it.key}`)}
+                      >
+                        I&apos;ve got it
+                      </button>
+                    )}
+                  </div>
+                  {claiming === `${room.id}:${it.key}` && (
+                    <ClaimPicker
+                      onPick={(name) => {
+                        actions.claim(room.id, it.key, name);
+                        setClaiming(null);
+                      }}
+                      onCancel={() => setClaiming(null)}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         {!room.contaminated && (
@@ -205,6 +277,76 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
                 DLO pickup reminder added for {labOn.map((k) => REQUEST_LABEL[k]).join(", ")}. Put the sample in the
                 pickup box, then check it off on the Lab and calls tab.
               </div>
+            )}
+
+            {room.stage !== "vacant" && room.stage !== "needs_cleanup" && (
+              <>
+                <div className="text-xs text-slate-500 mt-5 mb-2">Follow up visit</div>
+                {followupOpenFor === room.id ? (
+                  <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+                    <div className="text-xs text-slate-500 mb-2">When</div>
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {FOLLOWUP_TIMEFRAMES.map((t) => (
+                        <button
+                          key={t.key}
+                          className={`chip ${fuTimeframe === t.key ? "on" : ""}`}
+                          onClick={() => setFuTimeframe(t.key)}
+                        >
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="text-xs text-slate-500 mb-2">Reason</div>
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {FOLLOWUP_REASONS.map((r) => (
+                        <button
+                          key={r.key}
+                          className={`chip ${fuReason === r.key ? "on" : ""}`}
+                          onClick={() => setFuReason(r.key)}
+                        >
+                          {r.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white font-bold text-sm disabled:opacity-40"
+                        disabled={!fuTimeframe || !fuReason}
+                        onClick={saveFollowup}
+                      >
+                        Send to front desk
+                      </button>
+                      <button
+                        className="px-4 py-2.5 rounded-lg border border-slate-300 dark:border-slate-600 text-sm"
+                        onClick={() => setFollowupOpenFor(null)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : room.followup ? (
+                  <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2 text-sm">
+                    <span className="font-semibold">
+                      {FOLLOWUP_TIMEFRAME_LABEL[room.followup.timeframe]}, {FOLLOWUP_REASON_LABEL[room.followup.reason]}
+                    </span>
+                    <span className="flex gap-3">
+                      <button className="text-slate-500" onClick={openFollowup}>
+                        Change
+                      </button>
+                      <button className="text-slate-500" onClick={() => actions.setFollowup(room.id, null, null)}>
+                        Remove
+                      </button>
+                    </span>
+                  </div>
+                ) : (
+                  <button
+                    className="w-full py-3 rounded-xl border border-blue-600 text-blue-700 dark:text-blue-300 font-bold text-sm"
+                    onClick={openFollowup}
+                  >
+                    Schedule a follow up visit
+                  </button>
+                )}
+              </>
             )}
 
             <div className="text-xs text-slate-500 mt-5 mb-2">Message a teammate</div>

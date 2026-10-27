@@ -44,7 +44,6 @@ export interface RequestFlags {
   covid?: boolean;
   nurse?: boolean;
   vitals?: boolean;
-  nextPatient?: boolean;
   hgb?: boolean;
   fluoride?: boolean;
   glucose?: boolean;
@@ -73,7 +72,32 @@ export interface Room {
   ticket: string | null;
   note: string | null;
   requests: RequestFlags;
+  /** Patient initials from check in; cleared at check-out. */
+  initials: string | null;
+  /** Door directions shown to patients, editable in Admin. */
+  directions: string | null;
+  /** Who tapped "I've got it", keyed by request key, "note", "shots" or "followup". */
+  claims: Record<string, string>;
+  /** Follow up requested from the room, moves to the check-out list at check-out. */
+  followup: { timeframe: FollowupTimeframe; reason: FollowupReason } | null;
   updated_at: string;
+}
+
+export type FollowupTimeframe = "1_week" | "3_months" | "6_months" | "other";
+export type FollowupReason = "weight_check" | "asthma" | "medication_fu" | "generic";
+
+/** A patient who checked out and is back in the waiting room until "Pt departed". */
+export interface Checkout {
+  id: string;
+  clinic_id: string;
+  room_name: string | null;
+  ticket: string | null;
+  initials: string | null;
+  followup_timeframe: FollowupTimeframe | null;
+  followup_reason: FollowupReason | null;
+  followup_claimed_by: string | null;
+  checked_out_at: string;
+  departed_at: string | null;
 }
 
 export interface RoomHistoryRow {
@@ -91,6 +115,7 @@ export interface CallRow {
   clinic_id: string;
   room_id: string;
   ticket: string;
+  initials: string | null;
   called_at: string;
 }
 
@@ -103,6 +128,7 @@ export interface LabSample {
   room_id: string | null;
   room_name: string | null;
   ticket: string | null;
+  initials: string | null;
   sample_type: SampleType;
   pickup_date: string; // YYYY-MM-DD in the clinic's time zone
   requested_at: string;
@@ -125,6 +151,7 @@ export interface ResultCallback {
   room_id: string | null;
   room_name: string | null;
   ticket: string | null;
+  initials: string | null;
   tests: string[];
   status: CallbackStatus;
   departed_at: string;

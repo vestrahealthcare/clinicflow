@@ -8,6 +8,38 @@ import { StaffRoster } from "@/components/StaffRoster";
 import { STAGE_LABEL, STAGE_ORDER, THRESH_MIN } from "@/lib/constants";
 import { formatMinutes, isOverdue, computeDoctorIdleTime } from "@/lib/util";
 import { Stage } from "@/lib/types";
+import { useState } from "react";
+
+// One text box per room. Saves when you click away, so typing never fights the live updates.
+function DirectionsRow({
+  name,
+  value,
+  onSave
+}: {
+  name: string;
+  value: string | null;
+  onSave: (text: string) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? value ?? "";
+  return (
+    <tr className="border-t border-slate-100 dark:border-slate-700">
+      <td className="py-2 pr-3 whitespace-nowrap">{name}</td>
+      <td className="py-2">
+        <input
+          className="w-full border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1.5 text-sm bg-slate-50 dark:bg-slate-900"
+          placeholder="e.g. First door on the right"
+          value={shown}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => {
+            if (draft !== null && draft.trim() !== (value ?? "")) onSave(draft);
+            setDraft(null);
+          }}
+        />
+      </td>
+    </tr>
+  );
+}
 
 export default function AdminPage() {
   const { clinic, rooms, staff, history, avgByStage, countByStage, actions } = useClinic();
@@ -53,6 +85,26 @@ export default function AdminPage() {
       </div>
 
       <StaffRoster staff={staff} onAdd={actions.addStaff} onRename={actions.renameStaff} onRemove={actions.removeStaff} />
+
+      <div className="card p-5 mb-6">
+        <h3 className="font-bold mb-1">Room directions</h3>
+        <p className="text-sm text-slate-500 mb-3">
+          What the front desk and the waiting room screen tell patients, for example &ldquo;First door on the
+          right&rdquo;. Leave a room blank to show its hallway and side instead.
+        </p>
+        <table className="w-full text-sm">
+          <tbody>
+            {rooms.map((r) => (
+              <DirectionsRow
+                key={r.id}
+                name={r.name}
+                value={r.directions}
+                onSave={(text) => actions.setDirections(r.id, text)}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       <div className="grid gap-3 mb-6" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(170px,1fr))" }}>
         {STAGE_ORDER.map((s) => (
@@ -167,7 +219,7 @@ export default function AdminPage() {
                       {r.contaminated ? "Lockout" : STAGE_LABEL[r.stage] + (over ? " (overdue)" : "")}
                     </td>
                     <td className="py-2 pr-3 font-mono">
-                      {r.contaminated ? (
+                      {r.contaminated || r.stage === "vacant" ? (
                         "—"
                       ) : (
                         <LiveTimer
@@ -175,6 +227,7 @@ export default function AdminPage() {
                           stage={r.stage}
                           avgByStage={avgByStage}
                           countByStage={countByStage}
+                          minVisibleMin={0}
                         />
                       )}
                     </td>

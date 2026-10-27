@@ -1,4 +1,4 @@
-import { Room, Stage } from "./types";
+import { Hallway, Room, Stage } from "./types";
 import {
   THRESH_MIN,
   HOUSEKEEPING_COLOR,
@@ -7,7 +7,11 @@ import {
   ROLE_COLOR,
   YELLOW_OVER_AVG,
   RED_OVER_AVG,
-  MIN_SAMPLES_FOR_AVG
+  MIN_SAMPLES_FOR_AVG,
+  ALL_REQUEST_KEYS,
+  REQUEST_LABEL,
+  FOLLOWUP_TIMEFRAME_LABEL,
+  FOLLOWUP_REASON_LABEL
 } from "./constants";
 
 export function formatDuration(ms: number): string {
@@ -85,8 +89,49 @@ export function personLabel(
   return d ? `Doctor: ${d.name}` : "Doctor needed";
 }
 
-export function hasUrgentRequest(room: Room, urgentKeys: string[]): boolean {
-  return urgentKeys.some((k) => !!room.requests?.[k]) || room.contaminated;
+export interface AttentionItem {
+  /** Key used for "I've got it": a request key, "note", "shots" or "followup". */
+  key: string;
+  label: string;
+  claimedBy: string | null;
+}
+
+/**
+ * Everything on a room that is calling for someone: each tapped request, a
+ * message, the Shots stage, and a follow up request. Each one flashes the room
+ * until a named person taps "I've got it".
+ */
+export function attentionItems(room: Room): AttentionItem[] {
+  if (room.contaminated || room.stage === "vacant") return [];
+  const claims = room.claims ?? {};
+  const items: AttentionItem[] = [];
+  if (room.stage === "shots") items.push({ key: "shots", label: "Shots", claimedBy: claims.shots ?? null });
+  ALL_REQUEST_KEYS.filter((k) => room.requests?.[k]).forEach((k) =>
+    items.push({ key: k, label: REQUEST_LABEL[k] ?? k, claimedBy: claims[k] ?? null })
+  );
+  if (room.followup) {
+    items.push({
+      key: "followup",
+      label: `Schedule follow up: ${FOLLOWUP_TIMEFRAME_LABEL[room.followup.timeframe] ?? room.followup.timeframe}, ${
+        FOLLOWUP_REASON_LABEL[room.followup.reason] ?? room.followup.reason
+      }`,
+      claimedBy: claims.followup ?? null
+    });
+  }
+  if (room.note) items.push({ key: "note", label: "Message", claimedBy: claims.note ?? null });
+  return items;
+}
+
+/** True when the room should flash on the board. */
+export function needsAttention(room: Room): boolean {
+  return room.contaminated || attentionItems(room).some((i) => !i.claimedBy);
+}
+
+/** What to tell a patient about where the room is. Falls back to hallway and side until directions are set. */
+export function roomDirections(room: Room, hallway?: Hallway | null): string {
+  if (room.directions) return room.directions;
+  const side = room.side === "left" ? "left" : "right";
+  return hallway ? `${hallway.label}, ${side} side` : `${side} side`;
 }
 
 /**

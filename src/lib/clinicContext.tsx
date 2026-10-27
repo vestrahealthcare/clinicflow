@@ -13,7 +13,10 @@ import {
   LabSample,
   LabPickup,
   ResultCallback,
-  CallbackStatus
+  CallbackStatus,
+  Checkout,
+  FollowupTimeframe,
+  FollowupReason
 } from "./types";
 import { clinicToday, dateKeyInTz } from "./util";
 import { STAGE_ORDER, AVG_WINDOW_DAYS, MAX_STAFF_PER_ROLE, ROLE_COLOR } from "./constants";
@@ -29,6 +32,14 @@ export interface AdvanceOptions {
 
 interface ClinicActions {
   advanceStage: (roomId: string, opts?: AdvanceOptions) => Promise<void>;
+  /** Check-out: room goes to cleanup, patient goes to the waiting room list. */
+  checkOut: (roomId: string, opts?: { expected?: Stage; addCallback?: boolean }) => Promise<void>;
+  setFollowup: (roomId: string, timeframe: FollowupTimeframe | null, reason: FollowupReason | null) => Promise<void>;
+  /** "I've got it": pass the person's name, or an empty name to undo. */
+  claim: (roomId: string, key: string, name: string) => Promise<void>;
+  claimCheckoutFollowup: (checkoutId: string, name: string) => Promise<void>;
+  departCheckout: (checkoutId: string) => Promise<void>;
+  setDirections: (roomId: string, text: string) => Promise<void>;
   setSampleBoxed: (sampleId: string, boxed: boolean) => Promise<void>;
   removeSample: (sampleId: string) => Promise<void>;
   setDloCalled: (called: boolean) => Promise<void>;
@@ -37,7 +48,7 @@ interface ClinicActions {
   setLockout: (roomId: string, on: boolean) => Promise<void>;
   toggleRequest: (roomId: string, key: string) => Promise<void>;
   setNote: (roomId: string, note: string | null) => Promise<void>;
-  assignPatient: (roomId: string) => Promise<string | null>;
+  assignPatient: (roomId: string, initials: string) => Promise<string | null>;
   setStaffing: (roomId: string, nurseId: string | null, doctorId: string | null) => Promise<void>;
   setRoomCount: (count: number) => Promise<void>;
   addStaff: (role: StaffRole) => Promise<string | null>; // returns an error message, or null on success
@@ -65,6 +76,8 @@ export interface FollowupSummary {
 interface ClinicContextValue {
   clinic: Clinic | null;
   followups: FollowupSummary;
+  /** Patients checked out and still in the waiting room (not yet "Pt departed"), oldest first. */
+  checkouts: Checkout[];
   hallways: Hallway[];
   staff: Staff[];
   staffById: Record<string, Staff>;
@@ -90,6 +103,7 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
   const [labSamples, setLabSamples] = useState<LabSample[]>([]);
   const [labPickups, setLabPickups] = useState<LabPickup[]>([]);
   const [callbacks, setCallbacks] = useState<ResultCallback[]>([]);
+  const [checkouts, setCheckouts] = useState<Checkout[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -110,7 +124,7 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
   const loadFollowups = useCallback(async (clinicId: string, timezone: string | undefined) => {
     const today = clinicToday(timezone);
     const twoDaysAgo = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
-    const [samples, pickups, cbs] = await Promise.all([
+    const [samples, pickups, cbs, outs] = await Promise.all([
       supabase
         .from("lab_samples")
         .select("*")
@@ -123,11 +137,18 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
         .select("*")
         .eq("clinic_id", clinicId)
         .or(`status.neq.called,called_at.gte.${twoDaysAgo}`)
-        .order("departed_at")
+        .order("departed_at"),
+      supabase
+        .from("checkouts")
+        .select("*")
+        .eq("clinic_id", clinicId)
+        .is("departed_at", null)
+        .order("checked_out_at")
     ]);
     if (!samples.error) setLabSamples((samples.data as LabSample[]) ?? []);
     if (!pickups.error) setLabPickups((pickups.data as LabPickup[]) ?? []);
     if (!cbs.error) setCallbacks((cbs.data as ResultCallback[]) ?? []);
+    if (!outs.error) setCheckouts((outs.data as Checkout[]) ?? []);
   }, []);
 
   // Initial load.
@@ -258,7 +279,7 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
     if (!clinic) return;
     const refetch = () => loadFollowups(clinic.id, clinic.timezone);
     let channel = supabase.channel(`clinic-followups-${clinic.id}`);
-    ["lab_samples", "lab_pickups", "result_callbacks"].forEach((table) => {
+    ["lab_samples", "lab_pickups", "result_callbacks", "checkouts"].forEach((table) => {
       channel = channel.on(
         "postgres_changes",
         { event: "*", schema: "public", table, filter: `clinic_id=eq.${clinic.id}` },
@@ -316,6 +337,49 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
     if (clinic) loadFollowups(clinic.id, clinic.timezone);
   }, [clinic, loadFollowups]);
 
+  const checkOut = useCallback(
+    async (roomId: string, opts?: { expected?: Stage; addCallback?: boolean }) => {
+      await supabase.rpc("check_out_room", {
+        p_room_id: roomId,
+        p_expected_stage: opts?.expected ?? null,
+        p_add_callback: opts?.addCallback ?? false
+      });
+      refreshFollowups();
+    },
+    [refreshFollowups]
+  );
+
+  const setFollowup = useCallback(
+    async (roomId: string, timeframe: FollowupTimeframe | null, reason: FollowupReason | null) => {
+      await supabase.rpc("set_followup", { p_room_id: roomId, p_timeframe: timeframe, p_reason: reason });
+    },
+    []
+  );
+
+  const claim = useCallback(async (roomId: string, key: string, name: string) => {
+    await supabase.rpc("claim_request", { p_room_id: roomId, p_key: key, p_name: name });
+  }, []);
+
+  const claimCheckoutFollowup = useCallback(
+    async (checkoutId: string, name: string) => {
+      await supabase.rpc("claim_checkout_followup", { p_checkout_id: checkoutId, p_name: name });
+      refreshFollowups();
+    },
+    [refreshFollowups]
+  );
+
+  const departCheckout = useCallback(
+    async (checkoutId: string) => {
+      await supabase.rpc("set_checkout_departed", { p_checkout_id: checkoutId });
+      refreshFollowups();
+    },
+    [refreshFollowups]
+  );
+
+  const setDirections = useCallback(async (roomId: string, text: string) => {
+    await supabase.rpc("set_room_directions", { p_room_id: roomId, p_text: text });
+  }, []);
+
   const setSampleBoxed = useCallback(
     async (sampleId: string, boxed: boolean) => {
       await supabase.rpc("set_sample_boxed", { p_sample_id: sampleId, p_boxed: boxed });
@@ -369,8 +433,11 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
     await supabase.rpc("set_room_note", { p_room_id: roomId, p_note: note ?? "" });
   }, []);
 
-  const assignPatient = useCallback(async (roomId: string) => {
-    const { data, error: rpcErr } = await supabase.rpc("assign_patient", { p_room_id: roomId });
+  const assignPatient = useCallback(async (roomId: string, initials: string) => {
+    const { data, error: rpcErr } = await supabase.rpc("assign_patient", {
+      p_room_id: roomId,
+      p_initials: initials
+    });
     if (rpcErr) return null;
     return (data as string) ?? null;
   }, []);
@@ -461,6 +528,7 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
   const value: ClinicContextValue = {
     clinic,
     followups,
+    checkouts,
     hallways,
     staff,
     staffById,
@@ -472,6 +540,12 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
     error,
     actions: {
       advanceStage,
+      checkOut,
+      setFollowup,
+      claim,
+      claimCheckoutFollowup,
+      departCheckout,
+      setDirections,
       setSampleBoxed,
       removeSample,
       setDloCalled,

@@ -4,11 +4,17 @@ import { useState } from "react";
 import { useClinic } from "@/lib/clinicContext";
 import { LiveTimer } from "@/components/LiveTimer";
 import { Legend } from "@/components/Legend";
-import { STAGE_LABEL } from "@/lib/constants";
+import { ClaimPicker } from "@/components/ClaimPicker";
+import { STAGE_LABEL, FOLLOWUP_TIMEFRAME_LABEL, FOLLOWUP_REASON_LABEL } from "@/lib/constants";
+import { roomDirections } from "@/lib/util";
 
 export default function FrontDeskPage() {
-  const { rooms, hallways, staff, actions, avgByStage, countByStage } = useClinic();
-  const [lastAssigned, setLastAssigned] = useState<{ roomId: string; ticket: string } | null>(null);
+  const { rooms, hallways, staff, checkouts, actions, avgByStage, countByStage } = useClinic();
+  const [lastAssigned, setLastAssigned] = useState<{ roomId: string; ticket: string; initials: string } | null>(null);
+  const [initials, setInitials] = useState("");
+  const [claimingCheckout, setClaimingCheckout] = useState<string | null>(null);
+  const [confirmDepart, setConfirmDepart] = useState<string | null>(null);
+  const cleanInitials = initials.replace(/[^A-Za-z]/g, "").toUpperCase().slice(0, 4);
 
   const vacant = rooms.filter((r) => r.stage === "vacant" && !r.contaminated);
   const busy = rooms.filter((r) => !(r.stage === "vacant" && !r.contaminated));
@@ -16,8 +22,12 @@ export default function FrontDeskPage() {
   const doctors = staff.filter((s) => s.role === "doctor");
 
   async function checkIn(roomId: string) {
-    const ticket = await actions.assignPatient(roomId);
-    if (ticket) setLastAssigned({ roomId, ticket });
+    if (!cleanInitials) return;
+    const ticket = await actions.assignPatient(roomId, cleanInitials);
+    if (ticket) {
+      setLastAssigned({ roomId, ticket, initials: cleanInitials });
+      setInitials("");
+    }
   }
 
   const lastRoom = lastAssigned ? rooms.find((r) => r.id === lastAssigned.roomId) : null;
@@ -28,7 +38,7 @@ export default function FrontDeskPage() {
       {lastRoom && (
         <div className="card p-4 mb-5 bg-emerald-50 dark:bg-emerald-950 border-emerald-500 flex items-center justify-between gap-3 flex-wrap">
           <span className="font-semibold text-emerald-700 dark:text-emerald-300">
-            Tell the patient: {lastRoom.name}, {lastHallway?.label}, {lastRoom.side === "left" ? "Left" : "Right"} side
+            Tell the patient ({lastAssigned?.initials}): go to {lastRoom.name}, {roomDirections(lastRoom, lastHallway)}
             {" "}(Ticket {lastAssigned?.ticket})
           </span>
           <button className="text-emerald-700 dark:text-emerald-300 font-semibold" onClick={() => setLastAssigned(null)}>
@@ -38,6 +48,24 @@ export default function FrontDeskPage() {
       )}
 
       <Legend />
+
+      <div className="card p-4 mb-4 flex flex-wrap items-center gap-3">
+        <label htmlFor="initials" className="font-semibold text-sm">
+          Patient initials
+        </label>
+        <input
+          id="initials"
+          className="border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-lg font-mono uppercase w-28 bg-slate-50 dark:bg-slate-900"
+          placeholder="JS"
+          autoComplete="off"
+          maxLength={6}
+          value={cleanInitials}
+          onChange={(e) => setInitials(e.target.value)}
+        />
+        <span className="text-xs text-slate-500">
+          Type the initials first, then tap a vacant room. They stay with the room until check-out.
+        </span>
+      </div>
 
       <div className="text-xs text-slate-500 mb-2">Vacant rooms. Tap to check in the next patient.</div>
       <div className="grid gap-3 mb-8" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))" }}>
@@ -50,18 +78,104 @@ export default function FrontDeskPage() {
                 {r.name}
               </div>
               <div className="text-xs text-slate-500 mb-3">
-                {hallway?.label} &middot; {r.side === "left" ? "Left" : "Right"} side &middot; Vacant
+                {roomDirections(r, hallway)} &middot; Vacant
               </div>
               <button
-                className="w-full bg-emerald-600 text-white font-bold py-2.5 rounded-lg"
+                className="w-full bg-emerald-600 text-white font-bold py-2.5 rounded-lg disabled:opacity-40"
+                disabled={!cleanInitials}
                 onClick={() => checkIn(r.id)}
               >
-                Check in next patient
+                {cleanInitials ? `Check in ${cleanInitials}` : "Enter initials first"}
               </button>
             </div>
           );
         })}
         {vacant.length === 0 && <div className="text-slate-500 text-sm">No vacant rooms right now.</div>}
+      </div>
+
+      <div className="card p-5 mb-6">
+        <h3 className="font-bold mb-1">Checked out, in the waiting room</h3>
+        <p className="text-sm text-slate-500 mb-3">
+          Follow up visits requested in the room show here. Tap Pt departed when the patient has left.
+        </p>
+        {checkouts.length === 0 ? (
+          <div className="text-sm text-slate-400">Nobody checked out right now.</div>
+        ) : (
+          <div className="space-y-2">
+            {checkouts.map((c) => {
+              const hasFollowup = !!c.followup_timeframe && !!c.followup_reason;
+              return (
+                <div key={c.id} className="rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="font-mono text-lg font-semibold w-16">{c.initials ?? "—"}</span>
+                    <span className="text-sm text-slate-500 flex-1 min-w-[8rem]">
+                      from {c.room_name ?? "a room"}
+                      {hasFollowup && (
+                        <span className="block font-semibold text-slate-800 dark:text-slate-100">
+                          Schedule follow up: {FOLLOWUP_TIMEFRAME_LABEL[c.followup_timeframe!]},{" "}
+                          {FOLLOWUP_REASON_LABEL[c.followup_reason!]}
+                        </span>
+                      )}
+                    </span>
+                    {hasFollowup &&
+                      (c.followup_claimed_by ? (
+                        <span className="flex items-center gap-2 text-sm">
+                          <span className="text-emerald-700 dark:text-emerald-400 font-semibold">
+                            {c.followup_claimed_by} has it
+                          </span>
+                          <button className="text-xs text-slate-400" onClick={() => actions.claimCheckoutFollowup(c.id, "")}>
+                            Undo
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          className="px-3 py-2 rounded-lg bg-emerald-600 text-white font-semibold text-sm"
+                          onClick={() => setClaimingCheckout(c.id)}
+                        >
+                          I&apos;ve got it
+                        </button>
+                      ))}
+                    {confirmDepart === c.id ? (
+                      <span className="text-sm flex items-center gap-2">
+                        <span className="text-amber-600 font-semibold">Follow up not picked up yet.</span>
+                        <button
+                          className="px-3 py-2 rounded-lg bg-blue-600 text-white font-semibold"
+                          onClick={() => {
+                            setConfirmDepart(null);
+                            actions.departCheckout(c.id);
+                          }}
+                        >
+                          Depart anyway
+                        </button>
+                        <button className="text-slate-500" onClick={() => setConfirmDepart(null)}>
+                          Back
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        className="px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold text-sm"
+                        onClick={() =>
+                          hasFollowup && !c.followup_claimed_by ? setConfirmDepart(c.id) : actions.departCheckout(c.id)
+                        }
+                      >
+                        Pt departed
+                      </button>
+                    )}
+                  </div>
+                  {claimingCheckout === c.id && (
+                    <ClaimPicker
+                      onPick={(name) => {
+                        actions.claimCheckoutFollowup(c.id, name);
+                        setClaimingCheckout(null);
+                      }}
+                      onCancel={() => setClaimingCheckout(null)}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="card p-5 mb-6">
@@ -71,6 +185,7 @@ export default function FrontDeskPage() {
             <tr className="text-left text-slate-500 text-xs">
               <th className="pb-2">Room</th>
               <th className="pb-2">Status</th>
+              <th className="pb-2">Initials</th>
               <th className="pb-2">Ticket</th>
               <th className="pb-2">Time in step</th>
             </tr>
@@ -80,6 +195,7 @@ export default function FrontDeskPage() {
               <tr key={r.id} className="border-t border-slate-100 dark:border-slate-700">
                 <td className="py-2">{r.name}</td>
                 <td className="py-2">{r.contaminated ? "Contamination lockout" : STAGE_LABEL[r.stage]}</td>
+                <td className="py-2 font-mono">{r.initials ?? "—"}</td>
                 <td className="py-2">{r.ticket ?? "—"}</td>
                 <td className="py-2">
                   {r.contaminated ? (

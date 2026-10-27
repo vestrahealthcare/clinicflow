@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { formatDuration, timerColor } from "@/lib/util";
 import { Stage } from "@/lib/types";
+import { TIMER_VISIBLE_AFTER_MIN } from "@/lib/constants";
 
 const COLOR_CLASS: Record<string, string> = {
   normal: "",
@@ -17,7 +18,8 @@ export function LiveTimer({
   avgByStage,
   countByStage,
   yellowAfterMin,
-  redAfterMin
+  redAfterMin,
+  minVisibleMin
 }: {
   startedAt: string;
   paused?: boolean;
@@ -28,6 +30,8 @@ export function LiveTimer({
   /** Fixed thresholds in minutes, for timers that are not a room stage (e.g. waiting on results). */
   yellowAfterMin?: number;
   redAfterMin?: number;
+  /** Hide the timer until this many minutes have passed. Room step timers default to 5, others to 0. */
+  minVisibleMin?: number;
 }) {
   const [, setTick] = useState(0);
 
@@ -38,8 +42,12 @@ export function LiveTimer({
   }, [paused, startedAt]);
 
   if (paused) return <span>—</span>;
+  // Nobody is waiting on an empty room, so a vacant room never shows a running time.
+  if (stage === "vacant") return <span />;
 
   const ms = Date.now() - new Date(startedAt).getTime();
+  const hideBefore = minVisibleMin ?? (stage ? TIMER_VISIBLE_AFTER_MIN : 0);
+  if (ms < hideBefore * 60000) return <span />;
   let color: "normal" | "yellow" | "red" = "normal";
   if (stage && avgByStage && countByStage) {
     color = timerColor(stage, ms, avgByStage, countByStage);

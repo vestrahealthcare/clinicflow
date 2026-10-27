@@ -27,9 +27,9 @@ export const ACTION_LABEL: Partial<Record<Stage, string>> = {
   ready_for_nurse: "Start prep (nurse in room)",
   prepping: "Prep complete, ready for doctor",
   ready_for_doctor: "Start visit",
-  with_doctor: "Pt departed",
-  shots: "Pt departed",
-  other: "Pt departed",
+  with_doctor: "Check-out",
+  shots: "Check-out",
+  other: "Check-out",
   needs_cleanup: "Mark room clean"
 };
 
@@ -97,7 +97,6 @@ export const REQUEST_GROUPS: { title: string; items: RequestDef[] }[] = [
     items: [
       { key: "nurse", label: "Call nurse" },
       { key: "vitals", label: "Vitals" },
-      { key: "nextPatient", label: "Next patient in" },
       { key: "hgb", label: "Hgb" },
       { key: "fluoride", label: "Fluoride" },
       { key: "glucose", label: "Glucose" },
@@ -117,8 +116,32 @@ export const REQUEST_LABEL: Record<string, string> = Object.fromEntries(
 );
 
 // Urgent flags that should flash on the central board (per Nick: flash, no sound).
-export const URGENT_REQUEST_KEYS = ["nurse"];
 
+// Every request, a message, the Shots stage and a follow up request flash the
+// room on the board until someone taps "I've got it" (see attentionItems in util.ts).
+
+// Running timers show from the moment a room enters a step (0). Set to 5 to hide them
+// until a room has been in its step 5 minutes.
+export const TIMER_VISIBLE_AFTER_MIN = 0;
+
+export const FOLLOWUP_TIMEFRAMES: { key: "1_week" | "3_months" | "6_months" | "other"; label: string }[] = [
+  { key: "1_week", label: "1 week" },
+  { key: "3_months", label: "3 months" },
+  { key: "6_months", label: "6 months" },
+  { key: "other", label: "Other" }
+];
+export const FOLLOWUP_REASONS: { key: "weight_check" | "asthma" | "medication_fu" | "generic"; label: string }[] = [
+  { key: "weight_check", label: "Weight check" },
+  { key: "asthma", label: "Asthma" },
+  { key: "medication_fu", label: "Medication f/u" },
+  { key: "generic", label: "Generic" }
+];
+export const FOLLOWUP_TIMEFRAME_LABEL: Record<string, string> = Object.fromEntries(
+  FOLLOWUP_TIMEFRAMES.map((t) => [t.key, t.label])
+);
+export const FOLLOWUP_REASON_LABEL: Record<string, string> = Object.fromEntries(
+  FOLLOWUP_REASONS.map((r) => [r.key, r.label])
+);
 // Tests whose results may still be pending when the patient leaves. If any of
 // these are still marked on the room at "Pt departed", the room asks whether to
 // add the patient to the "Call with results" list.

@@ -54,7 +54,10 @@ function SampleRow({ sample, early }: { sample: LabSample; early?: boolean }) {
       }`}
     >
       <div className="flex-1 min-w-[10rem]">
-        <div className="font-semibold">{REQUEST_LABEL[sample.sample_type] ?? sample.sample_type}</div>
+        <div className="font-semibold">
+          {REQUEST_LABEL[sample.sample_type] ?? sample.sample_type}
+          {sample.initials ? <span className="ml-2 font-mono text-slate-500">{sample.initials}</span> : null}
+        </div>
         <div className="text-xs text-slate-500">
           {sample.room_name ?? "Room"}
           {sample.ticket ? ` · Ticket ${sample.ticket}` : ""} · requested {timeLabel(sample.requested_at, clinic?.timezone)}
@@ -93,6 +96,7 @@ function CallbackCard({ cb }: { cb: ResultCallback }) {
       <div className="flex justify-between gap-3 items-start">
         <div>
           <div className="font-bold">
+            {cb.initials ? <span className="font-mono mr-2">{cb.initials}</span> : null}
             {cb.room_name ?? "Room"}
             {cb.ticket ? ` · Ticket ${cb.ticket}` : ""}
           </div>
@@ -243,7 +247,7 @@ export default function LabPage() {
         <h2 className="text-xl font-bold mb-1">Call with results</h2>
         <p className="text-sm text-slate-500 mb-4">
           Patients who left while RSV, flu, strep or COVID results were still pending. Added from the room tablet when
-          you tap Pt departed. Only the ticket number and room are kept, no names or phone numbers.
+          you tap Check-out. Only initials, ticket number and room are kept, no names or phone numbers.
         </p>
 
         {followups.readyCallbacks.length > 0 && (

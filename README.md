@@ -18,9 +18,11 @@ supabase/schema.sql       All tables, security policies, and the database
                           once in a fresh Supabase project. Seeds Red Berry
                           with 12 rooms, 3 hallways, 2 nurses, 2 providers.
 supabase/update_2026_10_27.sql
-                          Upgrade for a project that already ran an older
-                          schema.sql. Safe to run more than once. Run it in
-                          the SQL editor BEFORE deploying the matching code.
+supabase/update_2026_10_27b.sql
+                          Upgrades for a project that already ran an older
+                          schema.sql. Run them in order in the SQL editor,
+                          BEFORE deploying the matching code. Each is safe
+                          to run more than once.
 src/lib/                  Shared types, constants (stage names, thresholds,
                           the one tap request list), and the ClinicProvider
                           that loads a clinic and keeps its rooms, staff, and
@@ -85,8 +87,8 @@ nurse roster from its own Admin page after that.
 ## Shots, Other, DLO pickup, and call with results
 
 - **Visit stage.** While the provider is in the room, the tablet offers
-  Shots, Other, and Pt departed. After Shots or Other the room offers Pt
-  departed again. Shots and Other are nurse tasks (green) and are timed as
+  Shots, Other, and Check-out. After Shots or Other the room offers
+  Check-out again. Shots and Other are nurse tasks (green) and are timed as
   their own steps on the Admin page. "Other" behaves exactly like Shots.
 - **Prepping** shows "Nurse in progress" (the nurse is in the room) instead
   of "Nurse needed".
@@ -97,7 +99,7 @@ nurse roster from its own Admin page after that.
   "Today" follows the clinic's time zone (clinics.timezone, default
   America/Chicago).
 - **Call with results.** If RSV, Flu, Strep or COVID is still marked on the
-  room when Pt departed is tapped, the tablet asks whether to add the
+  room when Check-out is tapped, the tablet asks whether to add the
   patient to the Call with results list. Staff tap "Results in, call now"
   when the result is back, then "Called". The list holds only the ticket
   number, room and tests, never a name or phone number. Waiting and ready
@@ -106,6 +108,36 @@ nurse roster from its own Admin page after that.
 - Each button tap sends the stage the tablet was showing, so a double tap or
   two tablets pressing at once cannot skip a step.
 - "Rooms in service" on the Admin page now hides unused rooms on every view.
+
+## Initials, check-out, follow up, and "I've got it"
+
+- **Initials.** The front desk types the patient's initials (letters, up to
+  4) before tapping a vacant room. They show on the room, the board, the
+  waiting room screen and the Lab and calls lists, and stay with the room
+  until check-out. Initials are a patient identifier stored in an open,
+  no login database, so have your privacy officer approve this before real
+  patients are entered.
+- **Check-out.** Replaces "Pt departed" in the room. The room goes to
+  cleanup, the patient moves to a "Checking out" list on the waiting room
+  screen and the front desk, and the room is cleared of initials, requests
+  and messages. Tapping **Pt departed** there removes the patient and their
+  initials for good.
+- **Follow up.** "Schedule a follow up visit" in each room: 1 week, 3
+  months, 6 months or other, plus weight check, asthma, medication f/u or
+  generic. It follows the patient to the front desk's Checking out list.
+- **I've got it.** Every request, message, Shots and follow up shows an
+  "I've got it" button. The person picks their name from the roster or types
+  one, and "Name has it" shows on the room and board. The button is on
+  both the board card and the room page.
+- **Flashing.** A room flashes on the board until each request, message,
+  Shots stage or follow up in it has an "I've got it".
+- **Timers.** Step timers run from the moment a room enters a step. Vacant
+  rooms show no timer. To hide
+  them for the first few minutes instead, change TIMER_VISIBLE_AFTER_MIN in
+  src/lib/constants.ts (for example to 5).
+- **Directions.** Door directions per room are edited in Admin and shown to
+  patients on the front desk and waiting room screens.
+- Rooms on the board open that room's tablet page when tapped.
 
 ## How the colors work
 
