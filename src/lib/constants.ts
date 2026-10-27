@@ -63,10 +63,24 @@ export const VACANT_COLOR = "#9AA6B0"; // neutral, so it never reads as "a nurse
 // many providers or nurses are on the roster.
 export const ROLE_COLOR = {
   doctor: "#3568C4",
-  nurse: "#2F9E6E"
+  nurse: "#2F9E6E",
+  frontdesk: "#64748B"
 } as const;
 
-export const MAX_STAFF_PER_ROLE = 6;
+// Roster size limits per group (providers stay at 6, nurses and front desk up to 20).
+export const MAX_STAFF: Record<"doctor" | "nurse" | "frontdesk", number> = {
+  doctor: 6,
+  nurse: 20,
+  frontdesk: 20
+};
+
+// Fishbowl flash colors: tests and support requests blue, Shots pink, messages orange.
+// Red is kept for contamination lockout. Follow up requests do not flash.
+export const FLASH_COLOR = {
+  support: "#2563EB",
+  shots: "#EC4899",
+  message: "#F97316"
+} as const;
 
 // Smart overdue coloring: white/default while normal, yellow once a room is
 // running meaningfully over the clinic's own recent average for that step,
@@ -130,10 +144,11 @@ export const FOLLOWUP_TIMEFRAMES: { key: "1_week" | "3_months" | "6_months" | "o
   { key: "6_months", label: "6 months" },
   { key: "other", label: "Other" }
 ];
-export const FOLLOWUP_REASONS: { key: "weight_check" | "asthma" | "medication_fu" | "generic"; label: string }[] = [
+export const FOLLOWUP_REASONS: { key: "weight_check" | "asthma" | "medication_fu" | "wcc" | "generic"; label: string }[] = [
   { key: "weight_check", label: "Weight check" },
   { key: "asthma", label: "Asthma" },
   { key: "medication_fu", label: "Medication f/u" },
+  { key: "wcc", label: "WCC" },
   { key: "generic", label: "Generic" }
 ];
 export const FOLLOWUP_TIMEFRAME_LABEL: Record<string, string> = Object.fromEntries(

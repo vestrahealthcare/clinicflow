@@ -19,7 +19,7 @@ import {
   FollowupReason
 } from "./types";
 import { clinicToday, dateKeyInTz } from "./util";
-import { STAGE_ORDER, AVG_WINDOW_DAYS, MAX_STAFF_PER_ROLE, ROLE_COLOR } from "./constants";
+import { STAGE_ORDER, AVG_WINDOW_DAYS, MAX_STAFF, ROLE_COLOR } from "./constants";
 
 export interface AdvanceOptions {
   /** From "with_doctor" only: "shots", "other" or "needs_cleanup" (default). */
@@ -34,7 +34,16 @@ interface ClinicActions {
   advanceStage: (roomId: string, opts?: AdvanceOptions) => Promise<void>;
   /** Check-out: room goes to cleanup, patient goes to the waiting room list. */
   checkOut: (roomId: string, opts?: { expected?: Stage; addCallback?: boolean }) => Promise<void>;
-  setFollowup: (roomId: string, timeframe: FollowupTimeframe | null, reason: FollowupReason | null) => Promise<void>;
+  setFollowup: (
+    roomId: string,
+    timeframe: FollowupTimeframe | null,
+    reason: FollowupReason | null,
+    note?: string
+  ) => Promise<void>;
+  /** Free text results typed on a Call with results task. */
+  setCallbackNote: (callbackId: string, note: string) => Promise<void>;
+  /** Start of day: every room (not in lockout) back to vacant, checkout list cleared, ticket numbers restart. */
+  resetDay: () => Promise<void>;
   /** "I've got it": pass the person's name, or an empty name to undo. */
   claim: (roomId: string, key: string, name: string) => Promise<void>;
   claimCheckoutFollowup: (checkoutId: string, name: string) => Promise<void>;
@@ -48,7 +57,13 @@ interface ClinicActions {
   setLockout: (roomId: string, on: boolean) => Promise<void>;
   toggleRequest: (roomId: string, key: string) => Promise<void>;
   setNote: (roomId: string, note: string | null) => Promise<void>;
-  assignPatient: (roomId: string, initials: string) => Promise<string | null>;
+  /** Returns the new ticket, or an error message to show the person (never fails silently). */
+  assignPatient: (
+    roomId: string,
+    initials: string,
+    /** Provider for this visit: id, null for any provider, or undefined to keep the room's provider. */
+    doctorId?: string | null
+  ) => Promise<{ ticket: string | null; error: string | null }>;
   setStaffing: (roomId: string, nurseId: string | null, doctorId: string | null) => Promise<void>;
   setRoomCount: (count: number) => Promise<void>;
   addStaff: (role: StaffRole) => Promise<string | null>; // returns an error message, or null on success
@@ -74,6 +89,9 @@ export interface FollowupSummary {
 }
 
 interface ClinicContextValue {
+  /** Who is using this device ("I am" at the top of every page). Empty until set. */
+  me: string;
+  setMe: (name: string) => void;
   clinic: Clinic | null;
   followups: FollowupSummary;
   /** Patients checked out and still in the waiting room (not yet "Pt departed"), oldest first. */
@@ -94,7 +112,27 @@ interface ClinicContextValue {
 
 const ClinicContext = createContext<ClinicContextValue | null>(null);
 
+const ME_KEY = "clinicflow.me";
+
 export function ClinicProvider({ slug, children }: { slug: string; children: React.ReactNode }) {
+  const [me, setMeState] = useState("");
+  useEffect(() => {
+    try {
+      setMeState(window.localStorage.getItem(ME_KEY) ?? "");
+    } catch {
+      // blocked storage: the name just is not remembered
+    }
+  }, []);
+  const setMe = useCallback((name: string) => {
+    const clean = name.trim().slice(0, 40);
+    setMeState(clean);
+    try {
+      if (clean) window.localStorage.setItem(ME_KEY, clean);
+      else window.localStorage.removeItem(ME_KEY);
+    } catch {
+      // ignore
+    }
+  }, []);
   const [clinic, setClinic] = useState<Clinic | null>(null);
   const [hallways, setHallways] = useState<Hallway[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
@@ -350,11 +388,30 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
   );
 
   const setFollowup = useCallback(
-    async (roomId: string, timeframe: FollowupTimeframe | null, reason: FollowupReason | null) => {
-      await supabase.rpc("set_followup", { p_room_id: roomId, p_timeframe: timeframe, p_reason: reason });
+    async (roomId: string, timeframe: FollowupTimeframe | null, reason: FollowupReason | null, note?: string) => {
+      await supabase.rpc("set_followup", {
+        p_room_id: roomId,
+        p_timeframe: timeframe,
+        p_reason: reason,
+        p_note: note ?? null
+      });
     },
     []
   );
+
+  const setCallbackNote = useCallback(
+    async (callbackId: string, note: string) => {
+      await supabase.rpc("set_callback_note", { p_callback_id: callbackId, p_note: note });
+      refreshFollowups();
+    },
+    [refreshFollowups]
+  );
+
+  const resetDay = useCallback(async () => {
+    if (!clinic) return;
+    await supabase.rpc("reset_day", { p_clinic_id: clinic.id });
+    refreshFollowups();
+  }, [clinic, refreshFollowups]);
 
   const claim = useCallback(async (roomId: string, key: string, name: string) => {
     await supabase.rpc("claim_request", { p_room_id: roomId, p_key: key, p_name: name });
@@ -433,13 +490,28 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
     await supabase.rpc("set_room_note", { p_room_id: roomId, p_note: note ?? "" });
   }, []);
 
-  const assignPatient = useCallback(async (roomId: string, initials: string) => {
+  const assignPatient = useCallback(async (roomId: string, initials: string, doctorId?: string | null) => {
     const { data, error: rpcErr } = await supabase.rpc("assign_patient", {
       p_room_id: roomId,
-      p_initials: initials
+      p_initials: initials,
+      p_doctor_id: doctorId ?? null,
+      p_set_doctor: doctorId !== undefined
     });
-    if (rpcErr) return null;
-    return (data as string) ?? null;
+    if (rpcErr) {
+      const missing =
+        rpcErr.code === "PGRST202" || rpcErr.code === "42883" || /assign_patient|schema cache/i.test(rpcErr.message);
+      return {
+        ticket: null,
+        error: missing
+          ? "Check in could not run because the database update is missing. Run clinicflow-update-2-2026-10-27b.sql in the Supabase SQL Editor, then try again."
+          : `Check in failed: ${rpcErr.message}`
+      };
+    }
+    const ticket = (data as string) ?? null;
+    return {
+      ticket,
+      error: ticket ? null : "That room is no longer vacant. Pick another room."
+    };
   }, []);
 
   const setStaffing = useCallback(
@@ -462,16 +534,17 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
     [clinic]
   );
 
-  // Up to MAX_STAFF_PER_ROLE providers and MAX_STAFF_PER_ROLE nurses. Returns
+  // Up to MAX_STAFF[role] people per group (providers 6, nurses 20, front desk 20). Returns
   // an error message string on failure (e.g. cap reached), null on success.
   const addStaff = useCallback(
     async (role: StaffRole) => {
       if (!clinic) return "No clinic loaded.";
       const currentOfRole = staff.filter((s) => s.role === role);
-      if (currentOfRole.length >= MAX_STAFF_PER_ROLE) {
-        return `You already have ${MAX_STAFF_PER_ROLE} ${role === "doctor" ? "providers" : "nurses"}.`;
+      if (currentOfRole.length >= MAX_STAFF[role]) {
+        const groupName = role === "doctor" ? "providers" : role === "nurse" ? "nurses" : "front desk staff";
+        return `You already have ${MAX_STAFF[role]} ${groupName}.`;
       }
-      const defaultName = role === "doctor" ? "New provider" : "New nurse";
+      const defaultName = role === "doctor" ? "New provider" : role === "nurse" ? "New nurse" : "New front desk";
       const { error: insertErr } = await supabase.from("staff").insert({
         clinic_id: clinic.id,
         name: defaultName,
@@ -526,6 +599,8 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
   }, [labSamples, labPickups, callbacks, clinic?.timezone]);
 
   const value: ClinicContextValue = {
+    me,
+    setMe,
     clinic,
     followups,
     checkouts,
@@ -542,6 +617,8 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
       advanceStage,
       checkOut,
       setFollowup,
+      setCallbackNote,
+      resetDay,
       claim,
       claimCheckoutFollowup,
       departCheckout,

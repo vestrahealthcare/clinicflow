@@ -18,10 +18,10 @@ import {
   FOLLOWUP_REASON_LABEL
 } from "@/lib/constants";
 import { FollowupReason, FollowupTimeframe } from "@/lib/types";
-import { attentionItems, isOverdue, needsAttention, personColor, personLabel, roomDirections } from "@/lib/util";
+import { attentionItems, flashKind, FLASH_CLASS, isOverdue, personColor, personLabel, roomDirections } from "@/lib/util";
 
 export default function RoomPage({ params }: { params: { slug: string; roomNumber: string } }) {
-  const { rooms, hallways, staffById, avgByStage, countByStage, actions } = useClinic();
+  const { rooms, hallways, staffById, avgByStage, countByStage, actions, me } = useClinic();
   const [noteDraft, setNoteDraft] = useState<Record<string, string>>({});
   // Shown when the patient is leaving but rapid/molecular tests are still marked on the room.
   const [askCallbackFor, setAskCallbackFor] = useState<string | null>(null);
@@ -30,6 +30,7 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
   const [followupOpenFor, setFollowupOpenFor] = useState<string | null>(null);
   const [fuTimeframe, setFuTimeframe] = useState<FollowupTimeframe | null>(null);
   const [fuReason, setFuReason] = useState<FollowupReason | null>(null);
+  const [fuNote, setFuNote] = useState("");
 
   const roomNumber = parseInt(params.roomNumber, 10);
   const room = rooms.find((r) => r.room_number === roomNumber);
@@ -46,7 +47,7 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
   const label = personLabel(room, staffById);
   const overdue = isOverdue(room);
   const items = attentionItems(room);
-  const flashing = needsAttention(room);
+  const flash = flashKind(room);
 
   const pendingTests = TEST_KEYS.filter((k) => room.requests?.[k]);
   const labOn = LAB_PICKUP_KEYS.filter((k) => room.requests?.[k]);
@@ -66,11 +67,12 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
   const openFollowup = () => {
     setFuTimeframe(room.followup?.timeframe ?? null);
     setFuReason(room.followup?.reason ?? null);
+    setFuNote(room.followup?.note ?? "");
     setFollowupOpenFor(room.id);
   };
   const saveFollowup = () => {
     if (!fuTimeframe || !fuReason) return;
-    actions.setFollowup(room.id, fuTimeframe, fuReason);
+    actions.setFollowup(room.id, fuTimeframe, fuReason, fuNote);
     setFollowupOpenFor(null);
   };
 
@@ -94,7 +96,7 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
 
       <div
         className={`card p-6 max-w-xl ${overdue ? "border-red-400" : ""} ${room.contaminated ? "border-red-700" : ""} ${
-          flashing && !room.contaminated ? "flash-urgent border-red-700" : ""
+          flash && !room.contaminated ? FLASH_CLASS[flash] : ""
         }`}
       >
         <h2 className="text-2xl font-bold mb-1">
@@ -217,7 +219,10 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
               {items.map((it) => (
                 <div key={it.key} className="rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <span className="font-semibold text-sm">{it.label}</span>
+                    <span className="font-semibold text-sm">
+                      {it.label}
+                      {it.detail && <span className="block font-normal text-slate-500">{it.detail}</span>}
+                    </span>
                     {it.claimedBy ? (
                       <span className="flex items-center gap-2 text-sm">
                         <span className="text-emerald-700 dark:text-emerald-400 font-semibold">{it.claimedBy} has it</span>
@@ -231,9 +236,9 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
                     ) : (
                       <button
                         className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-semibold text-sm"
-                        onClick={() => setClaiming(`${room.id}:${it.key}`)}
+                        onClick={() => (me ? actions.claim(room.id, it.key, me) : setClaiming(`${room.id}:${it.key}`))}
                       >
-                        I&apos;ve got it
+                        I&apos;ve got it{me ? ` (${me})` : ""}
                       </button>
                     )}
                   </div>
@@ -308,6 +313,14 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
                         </button>
                       ))}
                     </div>
+                    <div className="text-xs text-slate-500 mb-2">Note for the front desk (optional)</div>
+                    <input
+                      className="w-full border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900 mb-3"
+                      placeholder="e.g. needs a morning slot, bring shot record"
+                      maxLength={300}
+                      value={fuNote}
+                      onChange={(e) => setFuNote(e.target.value)}
+                    />
                     <div className="flex gap-2">
                       <button
                         className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white font-bold text-sm disabled:opacity-40"
@@ -328,6 +341,7 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
                   <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2 text-sm">
                     <span className="font-semibold">
                       {FOLLOWUP_TIMEFRAME_LABEL[room.followup.timeframe]}, {FOLLOWUP_REASON_LABEL[room.followup.reason]}
+                      {room.followup.note && <span className="block font-normal text-slate-500">{room.followup.note}</span>}
                     </span>
                     <span className="flex gap-3">
                       <button className="text-slate-500" onClick={openFollowup}>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useClinic } from "@/lib/clinicContext";
 import { LiveTimer } from "@/components/LiveTimer";
@@ -8,12 +8,18 @@ import { Legend } from "@/components/Legend";
 import { FollowupStrip } from "@/components/FollowupStrip";
 import { ClaimPicker } from "@/components/ClaimPicker";
 import { STAGE_LABEL } from "@/lib/constants";
-import { attentionItems, isOverdue, needsAttention, personColor, personLabel } from "@/lib/util";
+import { attentionItems, flashKind, FLASH_CLASS, isOverdue, personColor, personLabel } from "@/lib/util";
 
 export default function BoardPage({ params }: { params: { slug: string } }) {
-  const { rooms, hallways, staffById, avgByStage, countByStage, actions } = useClinic();
+  const { rooms, hallways, staffById, avgByStage, countByStage, actions, me } = useClinic();
   // "roomId:itemKey" of the item currently choosing a name.
   const [claiming, setClaiming] = useState<string | null>(null);
+
+  // Fishbowl look: black page behind white room squares.
+  useEffect(() => {
+    document.body.classList.add("fishbowl");
+    return () => document.body.classList.remove("fishbowl");
+  }, []);
 
   return (
     <div>
@@ -24,17 +30,17 @@ export default function BoardPage({ params }: { params: { slug: string } }) {
           const hallway = hallways.find((h) => h.id === room.hallway_id);
           const color = personColor(room);
           const overdue = isOverdue(room);
-          const urgent = needsAttention(room);
+          const flash = flashKind(room);
           const items = attentionItems(room);
           const label = personLabel(room, staffById);
 
           return (
             <div
               key={room.id}
-              className={`card border-l-4 hover:shadow-md transition-shadow ${urgent ? "flash-urgent border-red-700" : ""} ${
-                overdue && !urgent ? "border-red-300" : ""
-              }`}
-              style={!urgent ? { borderLeftColor: color } : undefined}
+              className={`rounded-2xl border-l-4 bg-white text-slate-900 shadow-sm hover:shadow-md transition-shadow ${
+                flash ? FLASH_CLASS[flash] : ""
+              } ${overdue && !flash ? "border-red-300" : ""}`}
+              style={{ borderLeftColor: flash === "lockout" ? "#B23A2C" : color, backgroundColor: flash ? undefined : "#ffffff" }}
             >
               {/* Tapping the top of the card opens the room's tablet page. */}
               <Link href={`/c/${params.slug}/room/${room.room_number}`} className="block p-4 pb-2">
@@ -70,15 +76,13 @@ export default function BoardPage({ params }: { params: { slug: string } }) {
                       <div className="flex items-center justify-between gap-2">
                         <span
                           className={`text-[11px] font-semibold px-1.5 py-0.5 rounded-full ${
-                            it.claimedBy
-                              ? "bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300"
-                              : "bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-300"
+                            it.claimedBy ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"
                           }`}
                         >
                           {it.label}
                         </span>
                         {it.claimedBy ? (
-                          <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 whitespace-nowrap">
+                          <span className="text-[11px] font-semibold text-emerald-700 whitespace-nowrap">
                             {it.claimedBy} has it
                             <button
                               className="ml-1.5 font-normal text-slate-400"
@@ -90,12 +94,15 @@ export default function BoardPage({ params }: { params: { slug: string } }) {
                         ) : (
                           <button
                             className="text-[11px] font-bold px-2 py-1 rounded-md bg-emerald-600 text-white whitespace-nowrap"
-                            onClick={() => setClaiming(`${room.id}:${it.key}`)}
+                            onClick={() =>
+                              me ? actions.claim(room.id, it.key, me) : setClaiming(`${room.id}:${it.key}`)
+                            }
                           >
                             I&apos;ve got it
                           </button>
                         )}
                       </div>
+                      {it.detail && <div className="text-xs text-slate-500 mt-0.5">{it.detail}</div>}
                       {it.key === "note" && room.note && (
                         <div className="text-xs italic text-slate-500 mt-0.5">&ldquo;{room.note}&rdquo;</div>
                       )}

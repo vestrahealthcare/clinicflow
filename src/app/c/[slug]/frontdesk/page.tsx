@@ -9,11 +9,14 @@ import { STAGE_LABEL, FOLLOWUP_TIMEFRAME_LABEL, FOLLOWUP_REASON_LABEL } from "@/
 import { roomDirections } from "@/lib/util";
 
 export default function FrontDeskPage() {
-  const { rooms, hallways, staff, checkouts, actions, avgByStage, countByStage } = useClinic();
+  const { rooms, hallways, staff, checkouts, actions, avgByStage, countByStage, me } = useClinic();
   const [lastAssigned, setLastAssigned] = useState<{ roomId: string; ticket: string; initials: string } | null>(null);
   const [initials, setInitials] = useState("");
   const [claimingCheckout, setClaimingCheckout] = useState<string | null>(null);
   const [confirmDepart, setConfirmDepart] = useState<string | null>(null);
+  const [checkInError, setCheckInError] = useState<string | null>(null);
+  // "keep" = leave the room's provider as set in Today's staffing, "any" = any provider, otherwise a provider id.
+  const [providerChoice, setProviderChoice] = useState<string>("keep");
   const cleanInitials = initials.replace(/[^A-Za-z]/g, "").toUpperCase().slice(0, 4);
 
   const vacant = rooms.filter((r) => r.stage === "vacant" && !r.contaminated);
@@ -23,10 +26,15 @@ export default function FrontDeskPage() {
 
   async function checkIn(roomId: string) {
     if (!cleanInitials) return;
-    const ticket = await actions.assignPatient(roomId, cleanInitials);
+    setCheckInError(null);
+    const doctorId = providerChoice === "keep" ? undefined : providerChoice === "any" ? null : providerChoice;
+    const { ticket, error } = await actions.assignPatient(roomId, cleanInitials, doctorId);
     if (ticket) {
       setLastAssigned({ roomId, ticket, initials: cleanInitials });
       setInitials("");
+      setProviderChoice("keep");
+    } else {
+      setCheckInError(error);
     }
   }
 
@@ -62,10 +70,33 @@ export default function FrontDeskPage() {
           value={cleanInitials}
           onChange={(e) => setInitials(e.target.value)}
         />
-        <span className="text-xs text-slate-500">
-          Type the initials first, then tap a vacant room. They stay with the room until check-out.
+        <label htmlFor="provider" className="font-semibold text-sm ml-2">
+          Provider
+        </label>
+        <select
+          id="provider"
+          className="border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900"
+          value={providerChoice}
+          onChange={(e) => setProviderChoice(e.target.value)}
+        >
+          <option value="keep">Room&apos;s usual provider</option>
+          <option value="any">Any provider</option>
+          {doctors.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
+            </option>
+          ))}
+        </select>
+        <span className="text-xs text-slate-500 basis-full">
+          Type the initials and pick the provider, then tap a vacant room. Initials stay with the room until check-out.
         </span>
       </div>
+
+      {checkInError && (
+        <div className="card p-4 mb-4 border-red-500 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 text-sm font-semibold">
+          {checkInError}
+        </div>
+      )}
 
       <div className="text-xs text-slate-500 mb-2">Vacant rooms. Tap to check in the next patient.</div>
       <div className="grid gap-3 mb-8" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))" }}>
@@ -114,6 +145,9 @@ export default function FrontDeskPage() {
                         <span className="block font-semibold text-slate-800 dark:text-slate-100">
                           Schedule follow up: {FOLLOWUP_TIMEFRAME_LABEL[c.followup_timeframe!]},{" "}
                           {FOLLOWUP_REASON_LABEL[c.followup_reason!]}
+                          {c.followup_note && (
+                            <span className="block font-normal text-slate-500">{c.followup_note}</span>
+                          )}
                         </span>
                       )}
                     </span>
@@ -130,7 +164,7 @@ export default function FrontDeskPage() {
                       ) : (
                         <button
                           className="px-3 py-2 rounded-lg bg-emerald-600 text-white font-semibold text-sm"
-                          onClick={() => setClaimingCheckout(c.id)}
+                          onClick={() => (me ? actions.claimCheckoutFollowup(c.id, me) : setClaimingCheckout(c.id))}
                         >
                           I&apos;ve got it
                         </button>

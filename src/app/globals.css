@@ -41,3 +41,23 @@ body {
 .flash-urgent {
   animation: flash-border 1.1s ease-in-out infinite;
 }
+
+/* Fishbowl flashes: the card border and glow pulse in the signal color. */
+@keyframes flash-blue-kf {
+  0%, 100% { box-shadow: 0 0 0 3px #2563eb, 0 0 18px 4px rgba(37, 99, 235, 0.75); background-color: #dbeafe; }
+  50% { box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15); background-color: #ffffff; }
+}
+@keyframes flash-pink-kf {
+  0%, 100% { box-shadow: 0 0 0 3px #ec4899, 0 0 18px 4px rgba(236, 72, 153, 0.75); background-color: #fce7f3; }
+  50% { box-shadow: 0 0 0 3px rgba(236, 72, 153, 0.15); background-color: #ffffff; }
+}
+@keyframes flash-orange-kf {
+  0%, 100% { box-shadow: 0 0 0 3px #f97316, 0 0 18px 4px rgba(249, 115, 22, 0.75); background-color: #ffedd5; }
+  50% { box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.15); background-color: #ffffff; }
+}
+.flash-blue { animation: flash-blue-kf 1.1s ease-in-out infinite; }
+.flash-pink { animation: flash-pink-kf 1.1s ease-in-out infinite; }
+.flash-orange { animation: flash-orange-kf 1.1s ease-in-out infinite; }
+
+/* Fishbowl page: black background behind white room squares. */
+body.fishbowl { background: #000; }

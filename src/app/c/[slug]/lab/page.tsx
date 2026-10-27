@@ -87,6 +87,8 @@ function SampleRow({ sample, early }: { sample: LabSample; early?: boolean }) {
 
 function CallbackCard({ cb }: { cb: ResultCallback }) {
   const { actions } = useClinic();
+  // Free text results. Saves when you tap away from the box.
+  const [draft, setDraft] = useState<string | null>(null);
   const ready = cb.status === "ready";
   const called = cb.status === "called";
   const since = called ? cb.called_at! : ready ? cb.ready_at ?? cb.departed_at : cb.departed_at;
@@ -125,6 +127,22 @@ function CallbackCard({ cb }: { cb: ResultCallback }) {
             {called ? "" : ready ? "since results came in" : "since patient left"}
           </div>
         </div>
+      </div>
+
+      <div className="mt-3">
+        <label className="text-xs text-slate-500 block mb-1">Results</label>
+        <textarea
+          className="w-full border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900"
+          rows={2}
+          maxLength={500}
+          placeholder="Type the results here, e.g. Flu A negative, COVID negative"
+          value={draft ?? cb.result_note ?? ""}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => {
+            if (draft !== null && draft.trim() !== (cb.result_note ?? "")) actions.setCallbackNote(cb.id, draft);
+            setDraft(null);
+          }}
+        />
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mt-3">

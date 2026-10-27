@@ -1,58 +1,32 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useClinic } from "@/lib/clinicContext";
 
-const KEY = "clinicflow.me";
-
-export function rememberedName(): string {
-  try {
-    return window.localStorage.getItem(KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function remember(name: string) {
-  try {
-    window.localStorage.setItem(KEY, name);
-  } catch {
-    // private window or blocked storage: nothing to remember, still works
-  }
-}
-
 /**
- * "I've got it": no logins, so the person says who they are. Roster names are one
- * tap, anyone else (front desk, medical assistants) can type a name. The last name
- * used on this device is offered first.
+ * Fallback for "I've got it" when nobody has set their name at the top of the page.
+ * Roster names are one tap; anyone else can type a name. It does not change the
+ * name set at the top, so a shared tablet never silently credits the wrong person.
  */
 export function ClaimPicker({ onPick, onCancel }: { onPick: (name: string) => void; onCancel: () => void }) {
   const { staff } = useClinic();
   const [typed, setTyped] = useState("");
-  const [last, setLast] = useState("");
-
-  useEffect(() => setLast(rememberedName()), []);
 
   const choose = (name: string) => {
     const clean = name.trim();
-    if (!clean) return;
-    remember(clean);
-    onPick(clean);
+    if (clean) onPick(clean);
   };
 
-  const roster = staff.map((s) => s.name);
+  const roster = Array.from(new Set(staff.map((s) => s.name)));
 
   return (
-    <div className="mt-2 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
-      <div className="text-xs text-slate-500 mb-2">Who has it?</div>
+    <div className="mt-2 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100">
+      <div className="text-xs text-slate-500 mb-2">
+        Who has it? Tip: set your name at the top of the page and this becomes one tap.
+      </div>
       <div className="flex flex-wrap gap-2 mb-2">
-        {last && !roster.includes(last) && (
-          <button className="chip on" onClick={() => choose(last)}>
-            {last}
-          </button>
-        )}
         {roster.map((n) => (
-          <button key={n} className={`chip ${n === last ? "on" : ""}`} onClick={() => choose(n)}>
+          <button key={n} className="chip" onClick={() => choose(n)}>
             {n}
           </button>
         ))}

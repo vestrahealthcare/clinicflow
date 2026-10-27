@@ -10,6 +10,53 @@ import { formatMinutes, isOverdue, computeDoctorIdleTime } from "@/lib/util";
 import { Stage } from "@/lib/types";
 import { useState } from "react";
 
+// Start of day: rooms back to vacant, Checking out list cleared, ticket numbers restart.
+function ResetDayCard({ onReset }: { onReset: () => Promise<void> }) {
+  const [asking, setAsking] = useState(false);
+  const [done, setDone] = useState(false);
+  return (
+    <div className="card p-5 mb-6">
+      <h3 className="font-bold mb-1">Reset for the day</h3>
+      <p className="text-sm text-slate-500 mb-3">
+        Sends every room back to Vacant, clears initials, requests and messages, empties the Checking out list and
+        restarts ticket numbers at A-01. Timing history, lab samples and open Call with results tasks are kept. A room
+        in Contamination lockout stays locked until it is cleared.
+      </p>
+      {asking ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm font-semibold text-amber-600">Reset every room now?</span>
+          <button
+            className="px-4 py-2.5 rounded-xl bg-red-700 text-white font-semibold text-sm"
+            onClick={async () => {
+              await onReset();
+              setAsking(false);
+              setDone(true);
+            }}
+          >
+            Yes, reset the day
+          </button>
+          <button className="px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-sm" onClick={() => setAsking(false)}>
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3">
+          <button
+            className="px-4 py-2.5 rounded-xl border border-red-700 text-red-700 dark:text-red-300 font-semibold text-sm"
+            onClick={() => {
+              setDone(false);
+              setAsking(true);
+            }}
+          >
+            Reset for the day
+          </button>
+          {done && <span className="text-sm text-emerald-600 font-semibold">Done. All rooms are vacant.</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // One text box per room. Saves when you click away, so typing never fights the live updates.
 function DirectionsRow({
   name,
@@ -85,6 +132,8 @@ export default function AdminPage() {
       </div>
 
       <StaffRoster staff={staff} onAdd={actions.addStaff} onRename={actions.renameStaff} onRemove={actions.removeStaff} />
+
+      <ResetDayCard onReset={actions.resetDay} />
 
       <div className="card p-5 mb-6">
         <h3 className="font-bold mb-1">Room directions</h3>

@@ -484,11 +484,71 @@ begin
   begin alter publication supabase_realtime add table checkouts; exception when duplicate_object then null; end;
 end $$;
 
+-- ---- Front desk staff, WCC follow ups, follow up note, results note ----------------
+-- Staff roles: add 'frontdesk' so front desk names can tap "I've got it" in one tap.
+do $$
+declare c record;
+begin
+  for c in
+    select conname from pg_constraint
+    where conrelid = 'public.staff'::regclass and contype = 'c'
+      and pg_get_constraintdef(oid) ilike '%role%'
+  loop
+    execute format('alter table public.staff drop constraint %I', c.conname);
+  end loop;
+  alter table public.staff add constraint staff_role_check check (role in ('nurse', 'doctor', 'frontdesk'));
+end $$;
+
+-- Follow up reasons: add 'wcc' (well child check), and a free text note.
+alter table checkouts add column if not exists followup_note text;
+do $$
+declare c record;
+begin
+  for c in
+    select conname from pg_constraint
+    where conrelid = 'public.checkouts'::regclass and contype = 'c'
+      and pg_get_constraintdef(oid) ilike '%followup_reason%'
+  loop
+    execute format('alter table public.checkouts drop constraint %I', c.conname);
+  end loop;
+  alter table public.checkouts add constraint checkouts_followup_reason_check
+    check (followup_reason in ('weight_check','asthma','medication_fu','wcc','generic'));
+end $$;
+
+-- Free text results on each "Call with results" task.
+alter table result_callbacks add column if not exists result_note text;
+
 -- ---- Functions ----------------------------------------------------------------
 
--- Front desk check in: now takes the patient's initials (letters only, up to 4).
-drop function if exists assign_patient(uuid);
-create or replace function assign_patient(p_room_id uuid, p_initials text default null)
+-- Front desk check in: takes the patient's initials (letters only, up to 4) and,
+-- when p_set_doctor is true, the provider for this visit (null means any provider).
+-- Remove every existing version of the functions below first, whatever their
+-- argument names or counts. Postgres refuses to "replace" a function whose input
+-- parameter names differ (for example an older assign_patient(p_room_id, p_label)),
+-- so this makes the script work on any copy of the database.
+do $$
+declare r record;
+begin
+  for r in
+    select p.oid::regprocedure as sig
+    from pg_proc p
+    where p.pronamespace = 'public'::regnamespace
+      and p.proname in (
+        'assign_patient', 'advance_room_stage', 'check_out_room', 'toggle_request',
+        'set_room_note', 'set_lockout', 'set_followup', 'claim_request',
+        'claim_checkout_followup', 'set_checkout_departed', 'set_room_directions',
+        'set_callback_note', 'reset_day'
+      )
+  loop
+    execute 'drop function ' || r.sig;
+  end loop;
+end $$;
+create or replace function assign_patient(
+  p_room_id uuid,
+  p_initials text default null,
+  p_doctor_id uuid default null,
+  p_set_doctor boolean default false
+)
 returns text language plpgsql as $$
 declare
   v_clinic_id uuid;
@@ -508,7 +568,9 @@ begin
 
   update rooms set
     stage = 'ready_for_nurse', stage_started_at = now(), ticket = v_ticket,
-    initials = v_initials, claims = '{}'::jsonb, followup = null, updated_at = now()
+    initials = v_initials, claims = '{}'::jsonb, followup = null,
+    assigned_doctor_id = case when p_set_doctor then p_doctor_id else assigned_doctor_id end,
+    updated_at = now()
   where id = p_room_id and stage = 'vacant' and contaminated = false;
   get diagnostics v_updated = row_count;
 
@@ -632,10 +694,10 @@ begin
     return;
   end if;
 
-  insert into checkouts (clinic_id, room_name, ticket, initials, followup_timeframe, followup_reason, followup_claimed_by)
+  insert into checkouts (clinic_id, room_name, ticket, initials, followup_timeframe, followup_reason, followup_note, followup_claimed_by)
   values (
     v_room.clinic_id, v_room.name, v_room.ticket, v_room.initials,
-    v_room.followup->>'timeframe', v_room.followup->>'reason',
+    v_room.followup->>'timeframe', v_room.followup->>'reason', v_room.followup->>'note',
     nullif(v_room.claims->>'followup', '')
   );
 
@@ -710,9 +772,11 @@ begin
 end;
 $$;
 
--- Schedule a follow up (both values) or clear it (both null).
-create or replace function set_followup(p_room_id uuid, p_timeframe text, p_reason text)
+-- Schedule a follow up (timeframe and reason, plus an optional free text note) or clear it (both null).
+create or replace function set_followup(p_room_id uuid, p_timeframe text, p_reason text, p_note text default null)
 returns void language plpgsql as $$
+declare
+  v_note text;
 begin
   if p_timeframe is null and p_reason is null then
     update rooms set followup = null, claims = coalesce(claims, '{}'::jsonb) - 'followup', updated_at = now()
@@ -720,11 +784,12 @@ begin
     return;
   end if;
   if p_timeframe not in ('1_week', '3_months', '6_months', 'other')
-     or p_reason not in ('weight_check', 'asthma', 'medication_fu', 'generic') then
+     or p_reason not in ('weight_check', 'asthma', 'medication_fu', 'wcc', 'generic') then
     return;
   end if;
+  v_note := nullif(left(trim(coalesce(p_note, '')), 300), '');
   update rooms set
-    followup = jsonb_build_object('timeframe', p_timeframe, 'reason', p_reason),
+    followup = jsonb_strip_nulls(jsonb_build_object('timeframe', p_timeframe, 'reason', p_reason, 'note', v_note)),
     claims = coalesce(claims, '{}'::jsonb) - 'followup',
     updated_at = now()
   where id = p_room_id;
@@ -768,6 +833,33 @@ returns void language plpgsql as $$
 begin
   update rooms set directions = nullif(trim(coalesce(p_text, '')), ''), updated_at = now()
   where id = p_room_id;
+end;
+$$;
+
+-- Free text results typed on a "Call with results" task.
+create or replace function set_callback_note(p_callback_id uuid, p_note text)
+returns void language plpgsql as $$
+begin
+  update result_callbacks set result_note = nullif(left(trim(coalesce(p_note, '')), 500), '')
+  where id = p_callback_id;
+end;
+$$;
+
+-- Start of day: every room (except ones in contamination lockout) back to vacant,
+-- the Checking out list cleared, ticket numbers restarted. Timing history, lab
+-- samples and open results calls are left alone.
+create or replace function reset_day(p_clinic_id uuid)
+returns void language plpgsql as $$
+begin
+  update rooms set
+    stage = 'vacant', stage_started_at = now(), ticket = null, initials = null, note = null,
+    requests = '{}'::jsonb, claims = '{}'::jsonb, followup = null, updated_at = now()
+  where clinic_id = p_clinic_id and contaminated = false;
+
+  update checkouts set departed_at = now(), initials = null
+  where clinic_id = p_clinic_id and departed_at is null;
+
+  update clinics set next_ticket_num = 1 where id = p_clinic_id;
 end;
 $$;
 
@@ -857,6 +949,21 @@ where r.room_number = v.room_number
 
 -- ---- Remove the retired "Next patient in" flag --------------------------------
 update rooms set requests = requests - 'nextPatient' where requests ? 'nextPatient';
+
+-- ---- Red Berry names: Ivette (nurse), Robin, Ali and Erica (front desk) --------------
+-- Only added when no one with that name is on the list yet, so it never duplicates.
+insert into staff (clinic_id, name, role, color, sort_order)
+select c.id, v.name, v.role, v.color,
+       coalesce((select max(s.sort_order) from staff s where s.clinic_id = c.id and s.role = v.role), 0) + v.ord
+from clinics c
+cross join (values
+  ('Ivette', 'nurse', '#2F9E6E', 1),
+  ('Robin', 'frontdesk', '#64748B', 1),
+  ('Ali', 'frontdesk', '#64748B', 2),
+  ('Erica', 'frontdesk', '#64748B', 3)
+) as v(name, role, color, ord)
+where c.slug = 'red-berry'
+  and not exists (select 1 from staff s where s.clinic_id = c.id and lower(s.name) = lower(v.name));
 
 -- ---- Grants (new table and functions need them, see README) --------------------
 grant usage on schema public to anon, authenticated, service_role;

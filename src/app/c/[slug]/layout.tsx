@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ClinicProvider, useClinic } from "@/lib/clinicContext";
+import { WhoAmI } from "@/components/WhoAmI";
 
 function TopNav({ slug }: { slug: string }) {
   const { clinic, followups } = useClinic();
@@ -41,6 +42,7 @@ function TopNav({ slug }: { slug: string }) {
           </Link>
         ))}
       </nav>
+      <WhoAmI />
     </header>
   );
 }

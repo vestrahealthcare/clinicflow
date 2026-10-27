@@ -94,7 +94,13 @@ export interface AttentionItem {
   key: string;
   label: string;
   claimedBy: string | null;
+  /** Extra free text, such as the note typed on a follow up request. */
+  detail?: string;
+  /** Which flash color this item triggers while unclaimed; none for follow ups. */
+  flash?: FlashKind;
 }
+
+export type FlashKind = "shots" | "support" | "message";
 
 /**
  * Everything on a room that is calling for someone: each tapped request, a
@@ -105,9 +111,10 @@ export function attentionItems(room: Room): AttentionItem[] {
   if (room.contaminated || room.stage === "vacant") return [];
   const claims = room.claims ?? {};
   const items: AttentionItem[] = [];
-  if (room.stage === "shots") items.push({ key: "shots", label: "Shots", claimedBy: claims.shots ?? null });
+  if (room.stage === "shots")
+    items.push({ key: "shots", label: "Shots", claimedBy: claims.shots ?? null, flash: "shots" });
   ALL_REQUEST_KEYS.filter((k) => room.requests?.[k]).forEach((k) =>
-    items.push({ key: k, label: REQUEST_LABEL[k] ?? k, claimedBy: claims[k] ?? null })
+    items.push({ key: k, label: REQUEST_LABEL[k] ?? k, claimedBy: claims[k] ?? null, flash: "support" })
   );
   if (room.followup) {
     items.push({
@@ -115,16 +122,39 @@ export function attentionItems(room: Room): AttentionItem[] {
       label: `Schedule follow up: ${FOLLOWUP_TIMEFRAME_LABEL[room.followup.timeframe] ?? room.followup.timeframe}, ${
         FOLLOWUP_REASON_LABEL[room.followup.reason] ?? room.followup.reason
       }`,
-      claimedBy: claims.followup ?? null
+      claimedBy: claims.followup ?? null,
+      detail: room.followup.note || undefined
     });
   }
-  if (room.note) items.push({ key: "note", label: "Message", claimedBy: claims.note ?? null });
+  if (room.note) items.push({ key: "note", label: "Message", claimedBy: claims.note ?? null, flash: "message" });
   return items;
 }
 
+/**
+ * What a room is flashing for, or null. Priority when several are waiting:
+ * contamination lockout (red), Shots (pink), tests and support (blue), message (orange).
+ * Each flash stops once its item has an "I've got it". Follow ups never flash.
+ */
+export function flashKind(room: Room): "lockout" | FlashKind | null {
+  if (room.contaminated) return "lockout";
+  const open = attentionItems(room).filter((i) => i.flash && !i.claimedBy);
+  for (const kind of ["shots", "support", "message"] as FlashKind[]) {
+    if (open.some((i) => i.flash === kind)) return kind;
+  }
+  return null;
+}
+
+/** CSS class that makes a room card flash in the right color. */
+export const FLASH_CLASS: Record<"lockout" | FlashKind, string> = {
+  lockout: "flash-urgent",
+  shots: "flash-pink",
+  support: "flash-blue",
+  message: "flash-orange"
+};
+
 /** True when the room should flash on the board. */
 export function needsAttention(room: Room): boolean {
-  return room.contaminated || attentionItems(room).some((i) => !i.claimedBy);
+  return flashKind(room) !== null;
 }
 
 /** What to tell a patient about where the room is. Falls back to hallway and side until directions are set. */

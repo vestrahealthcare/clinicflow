@@ -8,7 +8,7 @@ export type Stage =
   | "other"
   | "needs_cleanup";
 
-export type StaffRole = "nurse" | "doctor";
+export type StaffRole = "nurse" | "doctor" | "frontdesk";
 
 export interface Staff {
   id: string;
@@ -79,12 +79,12 @@ export interface Room {
   /** Who tapped "I've got it", keyed by request key, "note", "shots" or "followup". */
   claims: Record<string, string>;
   /** Follow up requested from the room, moves to the check-out list at check-out. */
-  followup: { timeframe: FollowupTimeframe; reason: FollowupReason } | null;
+  followup: { timeframe: FollowupTimeframe; reason: FollowupReason; note?: string } | null;
   updated_at: string;
 }
 
 export type FollowupTimeframe = "1_week" | "3_months" | "6_months" | "other";
-export type FollowupReason = "weight_check" | "asthma" | "medication_fu" | "generic";
+export type FollowupReason = "weight_check" | "asthma" | "medication_fu" | "wcc" | "generic";
 
 /** A patient who checked out and is back in the waiting room until "Pt departed". */
 export interface Checkout {
@@ -95,6 +95,7 @@ export interface Checkout {
   initials: string | null;
   followup_timeframe: FollowupTimeframe | null;
   followup_reason: FollowupReason | null;
+  followup_note: string | null;
   followup_claimed_by: string | null;
   checked_out_at: string;
   departed_at: string | null;
@@ -153,6 +154,8 @@ export interface ResultCallback {
   ticket: string | null;
   initials: string | null;
   tests: string[];
+  /** Free text results typed by staff. */
+  result_note: string | null;
   status: CallbackStatus;
   departed_at: string;
   ready_at: string | null;

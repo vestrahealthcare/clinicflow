@@ -19,7 +19,8 @@ supabase/schema.sql       All tables, security policies, and the database
                           with 12 rooms, 3 hallways, 2 nurses, 2 providers.
 supabase/update_2026_10_27.sql
 supabase/update_2026_10_27b.sql
-                          Upgrades for a project that already ran an older
+                          (the latest, includes everything in the earlier
+                          second update). Upgrades for a project that already ran an older
                           schema.sql. Run them in order in the SQL editor,
                           BEFORE deploying the matching code. Each is safe
                           to run more than once.
@@ -129,8 +130,22 @@ nurse roster from its own Admin page after that.
   "I've got it" button. The person picks their name from the roster or types
   one, and "Name has it" shows on the room and board. The button is on
   both the board card and the room page.
-- **Flashing.** A room flashes on the board until each request, message,
-  Shots stage or follow up in it has an "I've got it".
+- **Flashing.** On the black Fishbowl board each room is a white square. A
+  room flashes blue for tests and support requests, pink for Shots, and
+  orange for a message, until each has an "I've got it". Contamination
+  lockout flashes red. Follow up requests do not flash.
+- **Who are you.** "Who are you?" at the top of every page: pick a name from
+  the roster or type one. It is remembered on that device, and "I've got it"
+  then uses it in one tap. If no name is set, the button asks.
+- **Provider at check in.** A provider dropdown next to the initials box:
+  the room's usual provider, any provider, or a specific person.
+- **Follow up reasons** include WCC, plus a free text note that goes to the
+  front desk. **Call with results** tasks have a free text Results box.
+- **Reset for the day** (Admin) sends all rooms to Vacant, clears the
+  Checking out list and restarts ticket numbers. History, lab samples and
+  open results calls are kept.
+- **Roster.** Providers (up to 6), nurses (up to 20) and Front desk (up to
+  20). Front desk names can pick themselves for "I've got it".
 - **Timers.** Step timers run from the moment a room enters a step. Vacant
   rooms show no timer. To hide
   them for the first few minutes instead, change TIMER_VISIBLE_AFTER_MIN in
