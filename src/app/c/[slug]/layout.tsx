@@ -3,19 +3,16 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ClinicProvider, useClinic } from "@/lib/clinicContext";
-import { UndoProvider } from "@/lib/undoContext";
-import { ConnectionBadge } from "@/components/ConnectionBadge";
-import { StaffIdentityBadge } from "@/components/StaffIdentityBadge";
 
 function TopNav({ slug }: { slug: string }) {
-  const { clinic } = useClinic();
+  const { clinic, followups } = useClinic();
   const pathname = usePathname();
   const tabs = [
     { href: `/c/${slug}/room/1`, label: "Room view", match: "/room/" },
     { href: `/c/${slug}/board`, label: "Fishbowl board", match: "/board" },
     { href: `/c/${slug}/frontdesk`, label: "Front desk", match: "/frontdesk" },
+    { href: `/c/${slug}/lab`, label: "Lab and calls", match: "/lab", badge: followups.attentionCount },
     { href: `/c/${slug}/waiting`, label: "Waiting room", match: "/waiting" },
-    { href: `/c/${slug}/huddle`, label: "Huddle", match: "/huddle" },
     { href: `/c/${slug}/admin`, label: "Admin", match: "/admin" }
   ];
   return (
@@ -23,26 +20,27 @@ function TopNav({ slug }: { slug: string }) {
       <div className="flex items-baseline gap-2">
         <span className="font-bold text-lg">ClinicFlow</span>
         <span className="text-sm text-slate-500">{clinic?.name ?? slug}</span>
-        <ConnectionBadge />
       </div>
-      <div className="flex items-center gap-3 flex-wrap">
-        <nav className="flex bg-slate-100 dark:bg-slate-900 rounded-lg p-1 gap-0.5 flex-wrap">
-          {tabs.map((t) => (
-            <Link
-              key={t.href}
-              href={t.href}
-              className={`px-3 py-2 rounded-md text-sm font-semibold ${
-                pathname?.includes(t.match)
-                  ? "bg-white dark:bg-slate-700 shadow-sm"
-                  : "text-slate-500"
-              }`}
-            >
-              {t.label}
-            </Link>
-          ))}
-        </nav>
-        <StaffIdentityBadge />
-      </div>
+      <nav className="flex bg-slate-100 dark:bg-slate-900 rounded-lg p-1 gap-0.5 flex-wrap">
+        {tabs.map((t) => (
+          <Link
+            key={t.href}
+            href={t.href}
+            className={`px-3 py-2 rounded-md text-sm font-semibold ${
+              pathname?.includes(t.match)
+                ? "bg-white dark:bg-slate-700 shadow-sm"
+                : "text-slate-500"
+            }`}
+          >
+            {t.label}
+            {t.badge ? (
+              <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full bg-red-600 text-white text-xs font-bold">
+                {t.badge}
+              </span>
+            ) : null}
+          </Link>
+        ))}
+      </nav>
     </header>
   );
 }
@@ -68,9 +66,7 @@ export default function ClinicLayout({
 }) {
   return (
     <ClinicProvider slug={params.slug}>
-      <UndoProvider>
-        <ClinicShell slug={params.slug}>{children}</ClinicShell>
-      </UndoProvider>
+      <ClinicShell slug={params.slug}>{children}</ClinicShell>
     </ClinicProvider>
   );
 }

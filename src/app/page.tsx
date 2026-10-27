@@ -7,13 +7,17 @@ import { Clinic } from "@/lib/types";
 
 export default function Home() {
   const [clinics, setClinics] = useState<Clinic[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     supabase
       .from("clinics")
       .select("*")
       .order("name")
-      .then(({ data }) => setClinics((data as Clinic[]) ?? []));
+      .then(({ data, error }) => {
+        if (error) setLoadError(error.message);
+        setClinics((data as Clinic[]) ?? []);
+      });
   }, []);
 
   return (
@@ -37,7 +41,13 @@ export default function Home() {
             </div>
           </div>
         ))}
-        {clinics.length === 0 && (
+        {loadError && (
+          <p className="text-sm text-red-600">
+            Could not reach the database: {loadError}. If this mentions permission denied, run the grants
+            block at the bottom of <code>supabase/schema.sql</code> in the Supabase SQL Editor.
+          </p>
+        )}
+        {!loadError && clinics.length === 0 && (
           <p className="text-sm text-slate-500">
             No clinics yet. Run <code>supabase/schema.sql</code> against your Supabase project first.
           </p>

@@ -17,14 +17,18 @@ supabase/schema.sql       All tables, security policies, and the database
                           functions every button in the app calls. Run this
                           once in a fresh Supabase project. Seeds Red Berry
                           with 12 rooms, 3 hallways, 2 nurses, 2 providers.
+supabase/update_2026_10_27.sql
+                          Upgrade for a project that already ran an older
+                          schema.sql. Safe to run more than once. Run it in
+                          the SQL editor BEFORE deploying the matching code.
 src/lib/                  Shared types, constants (stage names, thresholds,
                           the one tap request list), and the ClinicProvider
                           that loads a clinic and keeps its rooms, staff, and
                           history live.
 src/components/           LiveTimer (ticking, self coloring elapsed time),
                           the role Legend, and the StaffRoster editor.
-src/app/c/[slug]/...      The five views: room, board, frontdesk, waiting,
-                          admin. [slug] is the clinic's slug (e.g. "red-berry").
+src/app/c/[slug]/...      The six views: room, board, frontdesk, waiting,
+                          lab (DLO pickup and call with results), admin. [slug] is the clinic's slug (e.g. "red-berry").
 ```
 
 ## 1. Create the Supabase project (free tier)
@@ -78,6 +82,31 @@ in the SQL Editor. It shows up immediately on the home page and at
 `/c/<new-slug>/board`, and so on. Each clinic manages its own provider and
 nurse roster from its own Admin page after that.
 
+## Shots, Other, DLO pickup, and call with results
+
+- **Visit stage.** While the provider is in the room, the tablet offers
+  Shots, Other, and Pt departed. After Shots or Other the room offers Pt
+  departed again. Shots and Other are nurse tasks (green) and are timed as
+  their own steps on the Admin page. "Other" behaves exactly like Shots.
+- **Prepping** shows "Nurse in progress" (the nurse is in the room) instead
+  of "Nurse needed".
+- **DLO pickup.** Turning on Throat culture, Strep culture, Viral panel or
+  Send out lab adds the sample to today's list on the Lab and calls tab.
+  Step 1 marks each sample as in the pickup box. Step 2 marks that DLO was
+  called. Samples never marked as in the box carry over in red the next day.
+  "Today" follows the clinic's time zone (clinics.timezone, default
+  America/Chicago).
+- **Call with results.** If RSV, Flu, Strep or COVID is still marked on the
+  room when Pt departed is tapped, the tablet asks whether to add the
+  patient to the Call with results list. Staff tap "Results in, call now"
+  when the result is back, then "Called". The list holds only the ticket
+  number, room and tests, never a name or phone number. Waiting and ready
+  timers turn yellow and red using the placeholder minutes at the bottom of
+  src/lib/constants.ts.
+- Each button tap sends the stage the tablet was showing, so a double tap or
+  two tablets pressing at once cannot skip a step.
+- "Rooms in service" on the Admin page now hides unused rooms on every view.
+
 ## How the colors work
 
 Color is by role, not by person: every provider is blue, every nurse is
@@ -101,6 +130,21 @@ instead, listed at the bottom of the Admin page. Averages refresh about once
 a minute, so a newly completed visit affects the color within a minute, not
 instantly.
 
+## If the home page says "No clinics yet" or shows a permission error
+
+Supabase projects created after May 30, 2026 do not expose new tables to the
+app automatically, so the app needs explicit permissions. `supabase/schema.sql`
+now includes them (the "grants" section near the bottom). If you ran an older
+copy of the schema, open the Supabase SQL Editor and run just these four lines,
+then refresh the page. No redeploy needed:
+
+```sql
+grant usage on schema public to anon, authenticated, service_role;
+grant select, insert, update, delete on all tables in schema public to anon, authenticated, service_role;
+grant usage, select on all sequences in schema public to anon, authenticated, service_role;
+grant execute on all functions in schema public to anon, authenticated, service_role;
+```
+
 ## Known simplifications, called out on purpose
 
 - **No login, by design.** This matches the spec ("open device access") and
@@ -116,8 +160,8 @@ instantly.
   between the end of one visit and the start of a provider's next one,
   counted only within the same day so overnight and weekend gaps never
   count. Visits staffed as "Any provider" are not attributed to anyone.
-- **Urgent items flash, they do not chime** (chaperone requests and
-  contamination lockout pulse red on the board), no audio, per the earlier
+- **Urgent items flash, they do not chime** ("Call nurse", results
+  ready to call, and contamination lockout pulse red on the board), no audio, per the earlier
   answer.
 - **Kiosk lockdown is not part of this repo.** For Fire HD 10 tablets, Fully
   Kiosk Browser (free) pointed at the tablet's URL, with "Ask before wake"

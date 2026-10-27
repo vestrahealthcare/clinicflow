@@ -24,20 +24,6 @@ export function formatMinutes(ms: number): string {
   return `${(ms / 60000).toFixed(1)} min`;
 }
 
-/** e.g. "2026-09-27T09:04:12.000Z" -> "9:04 AM" (browser-local time). */
-export function formatClockTime(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-}
-
-/** e.g. "09:00:00" (a Postgres `time`) -> "9:00 AM". */
-export function formatSqlTime(t: string): string {
-  const [h, m] = t.split(":").map(Number);
-  const d = new Date();
-  d.setHours(h, m, 0, 0);
-  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-}
-
 export function elapsedMs(room: Room): number {
   return Date.now() - new Date(room.stage_started_at).getTime();
 }
@@ -56,29 +42,6 @@ export function isOverdue(room: Room): boolean {
 }
 
 /**
- * Who's physically in the room right now, for the room tablet itself:
- * provider in the room = blue, nurse in the room = green, patient waiting
- * alone (checked in but no staff with them yet) = red, nobody in the room
- * (vacant or awaiting cleanup) = grey. This is deliberately different from
- * personColor's "whose turn is it next" logic used on the hallway board.
- */
-export function roomOccupancyColor(room: Room): string {
-  if (room.contaminated) return LOCKOUT_COLOR;
-  switch (room.stage) {
-    case "vacant":
-    case "needs_cleanup":
-      return VACANT_COLOR;
-    case "ready_for_nurse":
-    case "ready_for_doctor":
-      return LOCKOUT_COLOR; // patient alone, waiting on staff
-    case "prepping":
-      return ROLE_COLOR.nurse;
-    case "with_doctor":
-      return ROLE_COLOR.doctor;
-  }
-}
-
-/**
  * A room's accent color follows whoever's ROLE is up next, not a specific
  * person: every provider is blue, every nurse is green, so any nurse or any
  * provider can scan the board for their own color regardless of roster size.
@@ -87,7 +50,13 @@ export function personColor(room: Room): string {
   if (room.contaminated) return LOCKOUT_COLOR;
   if (room.stage === "vacant") return VACANT_COLOR;
   if (room.stage === "needs_cleanup") return HOUSEKEEPING_COLOR;
-  if (room.stage === "ready_for_nurse" || room.stage === "prepping") return ROLE_COLOR.nurse;
+  if (
+    room.stage === "ready_for_nurse" ||
+    room.stage === "prepping" ||
+    room.stage === "shots" ||
+    room.stage === "other"
+  )
+    return ROLE_COLOR.nurse;
   return ROLE_COLOR.doctor; // ready_for_doctor or with_doctor
 }
 
@@ -101,26 +70,23 @@ export function personLabel(
   staffById: Record<string, { name: string }>
 ): string | null {
   if (room.contaminated || room.stage === "vacant" || room.stage === "needs_cleanup") return null;
-  if (room.stage === "ready_for_nurse" || room.stage === "prepping") {
+  if (
+    room.stage === "ready_for_nurse" ||
+    room.stage === "prepping" ||
+    room.stage === "shots" ||
+    room.stage === "other"
+  ) {
     const s = room.assigned_nurse_id ? staffById[room.assigned_nurse_id] : null;
+    // Once prep has been started the nurse is in the room, so say so.
+    if (room.stage === "prepping") return s ? `Nurse in progress: ${s.name}` : "Nurse in progress";
     return s ? `Nurse: ${s.name}` : "Nurse needed";
   }
   const d = room.assigned_doctor_id ? staffById[room.assigned_doctor_id] : null;
   return d ? `Doctor: ${d.name}` : "Doctor needed";
 }
 
-/**
- * Picks readable body text (near-white or near-black) for a solid fill color,
- * via the standard YIQ brightness split. Needed now that board tiles fill
- * their whole background with the status color instead of just an accent.
- */
-export function contrastText(hex: string): string {
-  const clean = hex.replace("#", "");
-  const r = parseInt(clean.substring(0, 2), 16);
-  const g = parseInt(clean.substring(2, 4), 16);
-  const b = parseInt(clean.substring(4, 6), 16);
-  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
-  return yiq >= 150 ? "#0f172a" : "#ffffff";
+export function hasUrgentRequest(room: Room, urgentKeys: string[]): boolean {
+  return urgentKeys.some((k) => !!room.requests?.[k]) || room.contaminated;
 }
 
 /**
@@ -159,37 +125,6 @@ export function computeDoctorIdleTime(
   return result;
 }
 
-/** Groups the six raw stages into the three buckets the room-utilization view shows. */
-export function utilizationBucket(stage: Stage): "Vacant" | "Occupied" | "Needs cleanup" {
-  if (stage === "vacant") return "Vacant";
-  if (stage === "needs_cleanup") return "Needs cleanup";
-  return "Occupied";
-}
-
-/** Minimal CSV encoder: quotes any field containing a comma, quote, or newline. */
-export function toCsv(rows: Record<string, string | number | null>[]): string {
-  if (rows.length === 0) return "";
-  const headers = Object.keys(rows[0]);
-  const escape = (v: string | number | null) => {
-    const s = v === null || v === undefined ? "" : String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const lines = [headers.join(",")];
-  rows.forEach((row) => lines.push(headers.map((h) => escape(row[h])).join(",")));
-  return lines.join("\n");
-}
-
-/** Triggers a browser download of a CSV string — no server round trip needed. */
-export function downloadCsv(filename: string, csv: string): void {
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
 export type TimerColor = "normal" | "yellow" | "red";
 
 /**
@@ -221,4 +156,24 @@ export function timerColor(
   if (elapsed >= fallbackMs * RED_OVER_AVG) return "red";
   if (elapsed >= fallbackMs) return "yellow";
   return "normal";
+}
+
+/** Today's date (YYYY-MM-DD) in the clinic's time zone, matching the database's pickup_date. */
+export function clinicToday(timezone: string | undefined): string {
+  return dateKeyInTz(new Date(), timezone);
+}
+
+/** YYYY-MM-DD of any moment, in the clinic's time zone. */
+export function dateKeyInTz(when: Date | string, timezone: string | undefined): string {
+  const d = typeof when === "string" ? new Date(when) : when;
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone || "America/Chicago",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).format(d);
+  } catch {
+    return d.toISOString().slice(0, 10);
+  }
 }

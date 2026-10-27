@@ -4,6 +4,8 @@ export type Stage =
   | "prepping"
   | "ready_for_doctor"
   | "with_doctor"
+  | "shots"
+  | "other"
   | "needs_cleanup";
 
 export type StaffRole = "nurse" | "doctor";
@@ -17,15 +19,22 @@ export interface Staff {
   sort_order: number;
 }
 
+export interface Hallway {
+  id: string;
+  clinic_id: string;
+  key: string;
+  label: string;
+  color: string;
+  sort_order: number;
+}
+
 export interface Clinic {
   id: string;
   slug: string;
   name: string;
   room_count: number;
   next_ticket_num: number;
-  /** Doctor idle time only counts gaps between visits after this point —
-   *  resetting it doesn't delete any data, just moves this cutoff forward. */
-  idle_reset_at: string | null;
+  timezone?: string;
 }
 
 export interface RequestFlags {
@@ -34,10 +43,18 @@ export interface RequestFlags {
   strep?: boolean;
   covid?: boolean;
   nurse?: boolean;
-  chaperone?: boolean;
-  ecg?: boolean;
   vitals?: boolean;
   nextPatient?: boolean;
+  hgb?: boolean;
+  fluoride?: boolean;
+  glucose?: boolean;
+  urinalysis?: boolean;
+  hcg?: boolean;
+  throat_culture?: boolean;
+  strep_culture?: boolean;
+  viral_panel?: boolean;
+  sendout_lab?: boolean;
+  nebulizer?: boolean;
   [key: string]: boolean | undefined;
 }
 
@@ -55,55 +72,8 @@ export interface Room {
   assigned_doctor_id: string | null;
   ticket: string | null;
   note: string | null;
-  note_author: string | null;
   requests: RequestFlags;
-  flashing: boolean;
-  /** Patient identifier (initials, etc). Persists across a vacancy on
-   *  purpose — only replaced when the next patient is assigned. */
-  patient_label: string | null;
-  provider_finished_at: string | null;
   updated_at: string;
-}
-
-/** One trackable/claimable request instance — replaces the old boolean
- *  `Room.requests` flags. "Active" = cleared_at null. "Unclaimed" = active
- *  and acknowledged_at null (this is what keeps a room flashing). */
-export interface RoomRequest {
-  id: string;
-  clinic_id: string;
-  room_id: string;
-  key: string;
-  created_at: string;
-  created_by: string | null;
-  acknowledged_by: string | null;
-  acknowledged_at: string | null;
-  cleared_at: string | null;
-}
-
-export interface HuddlePost {
-  id: string;
-  clinic_id: string;
-  author: string;
-  body: string;
-  category: "today" | "week";
-  pinned: boolean;
-  created_at: string;
-}
-
-export interface ClinicDay {
-  id: string;
-  clinic_id: string;
-  day_date: string;
-  scheduled_start: string;
-  scheduled_end: string;
-  opened_at: string | null;
-  closed_at: string | null;
-  total_visits: number | null;
-  avg_ready_for_nurse_ms: number | null;
-  avg_prepping_ms: number | null;
-  avg_ready_for_doctor_ms: number | null;
-  avg_with_doctor_ms: number | null;
-  avg_needs_cleanup_ms: number | null;
 }
 
 export interface RoomHistoryRow {
@@ -113,7 +83,6 @@ export interface RoomHistoryRow {
   stage: Stage;
   duration_ms: number;
   provider_name: string | null;
-  nurse_name: string | null;
   ended_at: string;
 }
 
@@ -125,29 +94,40 @@ export interface CallRow {
   called_at: string;
 }
 
-/** Result row shape of get_provider_stats / get_nurse_stats RPCs. */
-export interface StaffStatRow {
-  provider_name?: string;
-  nurse_name?: string;
-  visits: number;
-  avg_ms: number;
-  p50_ms: number;
-  p90_ms: number;
+export type SampleType = "throat_culture" | "strep_culture" | "viral_panel" | "sendout_lab";
+
+/** A lab sample waiting for DLO pickup. No patient name: ticket and room only. */
+export interface LabSample {
+  id: string;
+  clinic_id: string;
+  room_id: string | null;
+  room_name: string | null;
+  ticket: string | null;
+  sample_type: SampleType;
+  pickup_date: string; // YYYY-MM-DD in the clinic's time zone
+  requested_at: string;
+  boxed_at: string | null;
 }
 
-/** Result row shape of get_stage_percentiles. */
-export interface StagePercentileRow {
-  stage: Stage;
-  n: number;
-  avg_ms: number;
-  p50_ms: number;
-  p90_ms: number;
+export interface LabPickup {
+  id: string;
+  clinic_id: string;
+  pickup_date: string;
+  dlo_called_at: string | null;
 }
 
-/** Result row shape of get_room_utilization. */
-export interface RoomUtilizationRow {
-  room_id: string;
-  room_name: string;
-  stage: Stage;
-  total_ms: number;
+export type CallbackStatus = "waiting" | "ready" | "called";
+
+/** A patient who left while rapid or molecular tests were still running. */
+export interface ResultCallback {
+  id: string;
+  clinic_id: string;
+  room_id: string | null;
+  room_name: string | null;
+  ticket: string | null;
+  tests: string[];
+  status: CallbackStatus;
+  departed_at: string;
+  ready_at: string | null;
+  called_at: string | null;
 }

@@ -1,46 +1,44 @@
 "use client";
 
-import Link from "next/link";
 import { useClinic } from "@/lib/clinicContext";
 import { LiveTimer } from "@/components/LiveTimer";
 import { Legend } from "@/components/Legend";
-import { NeedsAttentionStrip } from "@/components/NeedsAttentionStrip";
-import { STAGE_LABEL, REQUEST_LABEL } from "@/lib/constants";
-import { isOverdue, personColor, personLabel, contrastText } from "@/lib/util";
+import { FollowupStrip } from "@/components/FollowupStrip";
+import { STAGE_LABEL, ALL_REQUEST_KEYS, REQUEST_LABEL, URGENT_REQUEST_KEYS } from "@/lib/constants";
+import { isOverdue, personColor, personLabel, hasUrgentRequest } from "@/lib/util";
 
 export default function BoardPage({ params }: { params: { slug: string } }) {
-  const { rooms, staffById, activeRequestsByRoom, unclaimedRoomIds, today, avgByStage, countByStage } = useClinic();
-  const dayOpen = !!today?.opened_at && !today?.closed_at;
+  const { rooms, hallways, staffById, avgByStage, countByStage } = useClinic();
 
   return (
     <div>
-      <NeedsAttentionStrip />
+      <FollowupStrip slug={params.slug} />
       <Legend />
       <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))" }}>
         {rooms.map((room) => {
+          const hallway = hallways.find((h) => h.id === room.hallway_id);
           const color = personColor(room);
-          const text = contrastText(color);
           const overdue = isOverdue(room);
-          const urgent = room.contaminated;
-          const unclaimed = unclaimedRoomIds.has(room.id);
-          const badges = Object.values(activeRequestsByRoom[room.id] ?? {});
+          const urgent = hasUrgentRequest(room, URGENT_REQUEST_KEYS);
+          const badges = ALL_REQUEST_KEYS.filter((k) => room.requests?.[k]);
           const label = personLabel(room, staffById);
 
           return (
-            <Link
+            <div
               key={room.id}
-              href={`/c/${params.slug}/room/${room.room_number}`}
-              className={`card p-4 block cursor-pointer ${urgent ? "flash-urgent" : ""} ${
-                (room.flashing || unclaimed) && !urgent ? "flash-box" : ""
-              } ${overdue && !urgent ? "ring-2 ring-red-500" : ""}`}
-              style={{ backgroundColor: color, color: text }}
+              className={`card p-4 border-l-4 ${urgent ? "flash-urgent border-red-700" : ""} ${
+                overdue && !urgent ? "border-red-300" : ""
+              }`}
+              style={!urgent ? { borderLeftColor: color } : undefined}
             >
               <div className="flex justify-between font-bold text-sm mb-0.5">
-                <span>{room.name}</span>
+                <span>
+                  <span className="hall-dot" style={{ backgroundColor: hallway?.color ?? "#999" }} />
+                  {room.name}
+                </span>
               </div>
-              <div className="text-xs mb-2" style={{ color: text, opacity: 0.85 }}>
+              <div className="text-xs text-slate-500 mb-2">
                 {room.contaminated ? "Contamination lockout" : STAGE_LABEL[room.stage]}
-                {room.patient_label ? ` · ${room.patient_label}` : ""}
                 {label ? ` · ${label}` : ""}
               </div>
               <div className="text-xl font-semibold">
@@ -49,7 +47,6 @@ export default function BoardPage({ params }: { params: { slug: string } }) {
                 ) : (
                   <LiveTimer
                     startedAt={room.stage_started_at}
-                    paused={!dayOpen}
                     stage={room.stage}
                     avgByStage={avgByStage}
                     countByStage={countByStage}
@@ -58,24 +55,18 @@ export default function BoardPage({ params }: { params: { slug: string } }) {
               </div>
               {badges.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-2">
-                  {badges.map((req) => (
+                  {badges.map((k) => (
                     <span
-                      key={req.id}
-                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
-                      style={{ backgroundColor: text + "22", color: text }}
+                      key={k}
+                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-900 text-slate-500"
                     >
-                      {REQUEST_LABEL[req.key] ?? req.key}
-                      {req.acknowledged_at ? " ✓" : ""}
+                      {REQUEST_LABEL[k]}
                     </span>
                   ))}
                 </div>
               )}
-              {room.note && (
-                <div className="text-xs italic mt-2" style={{ color: text, opacity: 0.85 }}>
-                  &ldquo;{room.note}&rdquo;
-                </div>
-              )}
-            </Link>
+              {room.note && <div className="text-xs italic text-slate-500 mt-2">&ldquo;{room.note}&rdquo;</div>}
+            </div>
           );
         })}
       </div>

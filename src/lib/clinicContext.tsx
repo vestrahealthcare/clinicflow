@@ -1,66 +1,81 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState, useCallback } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 import { supabase } from "./supabaseClient";
-import { Clinic, Staff, Room, RoomHistoryRow, RoomRequest, Stage, StaffRole, ClinicDay } from "./types";
-import { STAGE_ORDER, AVG_WINDOW_DAYS, MAX_STAFF_PER_ROLE, ROLE_COLOR, STAFF_NAME_KEY } from "./constants";
+import {
+  Clinic,
+  Hallway,
+  Staff,
+  Room,
+  RoomHistoryRow,
+  Stage,
+  StaffRole,
+  LabSample,
+  LabPickup,
+  ResultCallback,
+  CallbackStatus
+} from "./types";
+import { clinicToday, dateKeyInTz } from "./util";
+import { STAGE_ORDER, AVG_WINDOW_DAYS, MAX_STAFF_PER_ROLE, ROLE_COLOR } from "./constants";
 
-export type ActionResult = { ok: boolean; error?: string };
-
-const OFFLINE_ERROR: ActionResult = { ok: false, error: "Connection lost — try again once reconnected." };
+export interface AdvanceOptions {
+  /** From "with_doctor" only: "shots", "other" or "needs_cleanup" (default). */
+  target?: Stage;
+  /** The stage the tablet was showing when tapped; the tap is ignored if the room has already moved on. */
+  expected?: Stage;
+  /** On departure, add the patient to the "Call with results" list if tests are still pending. */
+  addCallback?: boolean;
+}
 
 interface ClinicActions {
-  advanceStage: (roomId: string) => Promise<ActionResult & { historyId?: string | null }>;
-  setLockout: (roomId: string, on: boolean) => Promise<ActionResult>;
+  advanceStage: (roomId: string, opts?: AdvanceOptions) => Promise<void>;
+  setSampleBoxed: (sampleId: string, boxed: boolean) => Promise<void>;
+  removeSample: (sampleId: string) => Promise<void>;
+  setDloCalled: (called: boolean) => Promise<void>;
+  setCallbackStatus: (callbackId: string, status: CallbackStatus) => Promise<void>;
+  removeCallback: (callbackId: string) => Promise<void>;
+  setLockout: (roomId: string, on: boolean) => Promise<void>;
+  toggleRequest: (roomId: string, key: string) => Promise<void>;
   setNote: (roomId: string, note: string | null) => Promise<void>;
-  assignPatient: (roomId: string, label?: string | null) => Promise<{ ticket: string | null } & ActionResult>;
-  setPatientLabel: (roomId: string, label: string | null) => Promise<ActionResult>;
-  markProviderFinished: (roomId: string) => Promise<ActionResult>;
+  assignPatient: (roomId: string) => Promise<string | null>;
   setStaffing: (roomId: string, nurseId: string | null, doctorId: string | null) => Promise<void>;
   setRoomCount: (count: number) => Promise<void>;
-  resetDoctorIdle: () => Promise<ActionResult>;
   addStaff: (role: StaffRole) => Promise<string | null>; // returns an error message, or null on success
   renameStaff: (staffId: string, name: string) => Promise<void>;
-  removeStaff: (staffId: string) => Promise<ActionResult>;
-  toggleFlash: (roomId: string, on: boolean) => Promise<void>;
-  startDay: () => Promise<ActionResult>;
-  endDay: () => Promise<ActionResult>;
-  createRequest: (roomId: string, key: string) => Promise<ActionResult & { requestId?: string | null }>;
-  acknowledgeRequest: (requestId: string, by: string) => Promise<ActionResult>;
-  clearRequest: (requestId: string) => Promise<ActionResult>;
-  restoreRequest: (requestId: string) => Promise<ActionResult>;
-  resetPeriod: (since: string | null, until: string | null) => Promise<ActionResult>;
-  restoreRoomSnapshot: (roomId: string, snapshot: Partial<Room>, expectedUpdatedAt: string, historyIdToDelete?: string | null) => Promise<ActionResult>;
+  removeStaff: (staffId: string) => Promise<void>;
+}
+
+export interface FollowupSummary {
+  /** Samples requested today (clinic time), boxed or not. */
+  todaySamples: LabSample[];
+  /** Samples from earlier days that were never marked as boxed. */
+  earlierOpenSamples: LabSample[];
+  /** When someone called DLO today, if they have. */
+  dloCalledAt: string | null;
+  /** Patients left, waiting on results. */
+  waitingCallbacks: ResultCallback[];
+  /** Results are in, patient still needs a call. */
+  readyCallbacks: ResultCallback[];
+  /** Patients called today. */
+  doneTodayCallbacks: ResultCallback[];
+  /** Number shown on the "Lab and calls" tab: unboxed samples, DLO not called, results ready. */
+  attentionCount: number;
 }
 
 interface ClinicContextValue {
   clinic: Clinic | null;
+  followups: FollowupSummary;
+  hallways: Hallway[];
   staff: Staff[];
   staffById: Record<string, Staff>;
   rooms: Room[];
-  roomRequests: RoomRequest[];
-  /** Active (uncleared) requests per room, keyed by request key. */
-  activeRequestsByRoom: Record<string, Record<string, RoomRequest>>;
-  /** Rooms with at least one active-and-unacknowledged ("unclaimed") request. */
-  unclaimedRoomIds: Set<string>;
   /** Completed stage instances in the trailing AVG_WINDOW_DAYS, used for both
    *  the admin dashboard and the smart yellow/red timer coloring everywhere. */
   history: RoomHistoryRow[];
   avgByStage: Partial<Record<Stage, number>>;
   countByStage: Partial<Record<Stage, number>>;
-  /** Today's clinic_days row, if Start Day has been pressed today. */
-  today: ClinicDay | null;
-  /** Past clinic_days rows, most recent first. */
-  pastDays: ClinicDay[];
   loading: boolean;
   error: string | null;
-  connected: boolean;
-  lastUpdatedAt: string | null;
-  /** Per-device "who's using this tablet" name — no login system, so this is
-   *  the only identity there is. Persisted to localStorage; attached to
-   *  requests created, requests claimed, and notes sent. */
-  staffName: string;
-  setStaffName: (name: string) => void;
   actions: ClinicActions;
 }
 
@@ -68,54 +83,15 @@ const ClinicContext = createContext<ClinicContextValue | null>(null);
 
 export function ClinicProvider({ slug, children }: { slug: string; children: React.ReactNode }) {
   const [clinic, setClinic] = useState<Clinic | null>(null);
+  const [hallways, setHallways] = useState<Hallway[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
-  const [roomRequests, setRoomRequests] = useState<RoomRequest[]>([]);
   const [history, setHistory] = useState<RoomHistoryRow[]>([]);
-  const [today, setToday] = useState<ClinicDay | null>(null);
-  const [pastDays, setPastDays] = useState<ClinicDay[]>([]);
+  const [labSamples, setLabSamples] = useState<LabSample[]>([]);
+  const [labPickups, setLabPickups] = useState<LabPickup[]>([]);
+  const [callbacks, setCallbacks] = useState<ResultCallback[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [connected, setConnected] = useState(true);
-  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
-  const connectedRef = useRef(true);
-  const [staffNameState, setStaffNameState] = useState("");
-  const staffNameRef = useRef("");
-
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STAFF_NAME_KEY) ?? "";
-      staffNameRef.current = stored;
-      setStaffNameState(stored);
-    } catch {
-      // Private browsing / blocked storage — just start blank.
-    }
-  }, []);
-
-  const setStaffName = useCallback((name: string) => {
-    staffNameRef.current = name;
-    setStaffNameState(name);
-    try {
-      localStorage.setItem(STAFF_NAME_KEY, name);
-    } catch {
-      // Ignore — just won't be remembered next time.
-    }
-  }, []);
-
-  const bumpUpdated = useCallback(() => setLastUpdatedAt(new Date().toISOString()), []);
-
-  const loadDays = useCallback(async (clinicId: string) => {
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const { data } = await supabase
-      .from("clinic_days")
-      .select("*")
-      .eq("clinic_id", clinicId)
-      .order("day_date", { ascending: false })
-      .limit(3660); // ~10 years of days — cheap since each row is tiny, and the All-time tab needs full history
-    const rows = (data as ClinicDay[]) ?? [];
-    setToday(rows.find((d) => d.day_date === todayStr) ?? null);
-    setPastDays(rows.filter((d) => d.day_date !== todayStr));
-  }, []);
 
   const loadHistory = useCallback(async (clinicId: string) => {
     const since = new Date(Date.now() - AVG_WINDOW_DAYS * 24 * 3600 * 1000).toISOString();
@@ -129,24 +105,29 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
     setHistory((data as RoomHistoryRow[]) ?? []);
   }, []);
 
-  const loadRooms = useCallback(async (clinicId: string) => {
-    const { data } = await supabase.from("rooms").select("*").eq("clinic_id", clinicId).order("room_number");
-    setRooms((data as Room[]) ?? []);
-  }, []);
-
-  const loadStaff = useCallback(async (clinicId: string) => {
-    const { data } = await supabase.from("staff").select("*").eq("clinic_id", clinicId).order("sort_order");
-    setStaff((data as Staff[]) ?? []);
-  }, []);
-
-  const loadActiveRequests = useCallback(async (clinicId: string) => {
-    const { data } = await supabase
-      .from("room_requests")
-      .select("*")
-      .eq("clinic_id", clinicId)
-      .is("cleared_at", null)
-      .order("created_at", { ascending: true });
-    setRoomRequests((data as RoomRequest[]) ?? []);
+  // DLO pickup list and "call with results" list. Small tables, so a refetch
+  // after any change (or every 30s as a safety net) is simpler than patching rows.
+  const loadFollowups = useCallback(async (clinicId: string, timezone: string | undefined) => {
+    const today = clinicToday(timezone);
+    const twoDaysAgo = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
+    const [samples, pickups, cbs] = await Promise.all([
+      supabase
+        .from("lab_samples")
+        .select("*")
+        .eq("clinic_id", clinicId)
+        .or(`pickup_date.eq.${today},and(boxed_at.is.null,pickup_date.lt.${today})`)
+        .order("requested_at"),
+      supabase.from("lab_pickups").select("*").eq("clinic_id", clinicId).eq("pickup_date", today),
+      supabase
+        .from("result_callbacks")
+        .select("*")
+        .eq("clinic_id", clinicId)
+        .or(`status.neq.called,called_at.gte.${twoDaysAgo}`)
+        .order("departed_at")
+    ]);
+    if (!samples.error) setLabSamples((samples.data as LabSample[]) ?? []);
+    if (!pickups.error) setLabPickups((pickups.data as LabPickup[]) ?? []);
+    if (!cbs.error) setCallbacks((cbs.data as ResultCallback[]) ?? []);
   }, []);
 
   // Initial load.
@@ -165,7 +146,11 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
 
       if (clinicErr || !clinicRow) {
         if (!cancelled) {
-          setError(`No clinic found for slug "${slug}". Check the clinics table.`);
+          setError(
+            clinicErr
+              ? `Could not load clinic "${slug}": ${clinicErr.message}`
+              : `No clinic found for slug "${slug}". Check the clinics table.`
+          );
           setLoading(false);
         }
         return;
@@ -173,12 +158,19 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
       if (cancelled) return;
       setClinic(clinicRow as Clinic);
 
+      const [{ data: hallwayRows }, { data: staffRows }, { data: roomRows }] = await Promise.all([
+        supabase.from("hallways").select("*").eq("clinic_id", clinicRow.id).order("sort_order"),
+        supabase.from("staff").select("*").eq("clinic_id", clinicRow.id).order("sort_order"),
+        supabase.from("rooms").select("*").eq("clinic_id", clinicRow.id).order("room_number")
+      ]);
+
+      if (cancelled) return;
+      setHallways((hallwayRows as Hallway[]) ?? []);
+      setStaff((staffRows as Staff[]) ?? []);
+      setRooms((roomRows as Room[]) ?? []);
       await Promise.all([
-        loadStaff(clinicRow.id),
-        loadRooms(clinicRow.id),
-        loadActiveRequests(clinicRow.id),
         loadHistory(clinicRow.id),
-        loadDays(clinicRow.id)
+        loadFollowups(clinicRow.id, (clinicRow as Clinic).timezone)
       ]);
       if (!cancelled) setLoading(false);
     }
@@ -187,13 +179,9 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
     return () => {
       cancelled = true;
     };
-  }, [slug, loadHistory, loadDays, loadRooms, loadStaff, loadActiveRequests]);
+  }, [slug, loadHistory, loadFollowups]);
 
   // Realtime subscription: keep `rooms` in sync the instant any tablet changes one.
-  // Also doubles as the clinic's connection-status signal — its subscribe
-  // callback reports SUBSCRIBED / TIMED_OUT / CLOSED / CHANNEL_ERROR, and on
-  // every (re)connect we refetch everything so the app isn't just "assumed"
-  // fresh after an outage.
   useEffect(() => {
     if (!clinic) return;
 
@@ -203,7 +191,6 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
         "postgres_changes",
         { event: "*", schema: "public", table: "rooms", filter: `clinic_id=eq.${clinic.id}` },
         (payload) => {
-          bumpUpdated();
           setRooms((prev) => {
             if (payload.eventType === "DELETE") {
               return prev.filter((r) => r.id !== (payload.old as Room).id);
@@ -217,28 +204,12 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
           });
         }
       )
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") {
-          connectedRef.current = true;
-          setConnected(true);
-          bumpUpdated();
-          Promise.all([
-            loadRooms(clinic.id),
-            loadStaff(clinic.id),
-            loadActiveRequests(clinic.id),
-            loadHistory(clinic.id),
-            loadDays(clinic.id)
-          ]);
-        } else if (status === "TIMED_OUT" || status === "CLOSED" || status === "CHANNEL_ERROR") {
-          connectedRef.current = false;
-          setConnected(false);
-        }
-      });
+      .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [clinic, bumpUpdated, loadRooms, loadStaff, loadActiveRequests, loadHistory, loadDays]);
+  }, [clinic]);
 
   // Also refresh the clinic row itself when room_count or ticket counter change elsewhere.
   useEffect(() => {
@@ -248,16 +219,13 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "clinics", filter: `id=eq.${clinic.id}` },
-        (payload) => {
-          bumpUpdated();
-          setClinic(payload.new as Clinic);
-        }
+        (payload) => setClinic(payload.new as Clinic)
       )
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [clinic?.id, bumpUpdated]);
+  }, [clinic?.id]);
 
   // Staff roster changes (names added/renamed/removed) reflected everywhere live.
   useEffect(() => {
@@ -268,7 +236,6 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
         "postgres_changes",
         { event: "*", schema: "public", table: "staff", filter: `clinic_id=eq.${clinic.id}` },
         (payload) => {
-          bumpUpdated();
           setStaff((prev) => {
             if (payload.eventType === "DELETE") return prev.filter((s) => s.id !== (payload.old as Staff).id);
             const updated = payload.new as Staff;
@@ -284,41 +251,27 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [clinic?.id, bumpUpdated]);
+  }, [clinic?.id]);
 
-  // Room requests (quick-tests/clinical-support) reflected live everywhere —
-  // this is what drives request-based flashing and the Needs Attention strip.
+  // Lab pickup and callback lists: refetch whenever any of the three tables change.
   useEffect(() => {
     if (!clinic) return;
-    const channel = supabase
-      .channel(`clinic-requests-${clinic.id}`)
-      .on(
+    const refetch = () => loadFollowups(clinic.id, clinic.timezone);
+    let channel = supabase.channel(`clinic-followups-${clinic.id}`);
+    ["lab_samples", "lab_pickups", "result_callbacks"].forEach((table) => {
+      channel = channel.on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "room_requests", filter: `clinic_id=eq.${clinic.id}` },
-        (payload) => {
-          bumpUpdated();
-          setRoomRequests((prev) => {
-            if (payload.eventType === "DELETE") {
-              return prev.filter((r) => r.id !== (payload.old as RoomRequest).id);
-            }
-            const updated = payload.new as RoomRequest;
-            const idx = prev.findIndex((r) => r.id === updated.id);
-            if (updated.cleared_at) {
-              // Cleared requests drop out of the "active" set we keep in memory.
-              return idx === -1 ? prev : prev.filter((r) => r.id !== updated.id);
-            }
-            if (idx === -1) return [...prev, updated];
-            const next = [...prev];
-            next[idx] = updated;
-            return next;
-          });
-        }
-      )
-      .subscribe();
+        { event: "*", schema: "public", table, filter: `clinic_id=eq.${clinic.id}` },
+        refetch
+      );
+    });
+    channel.subscribe();
+    const id = setInterval(refetch, 30_000);
     return () => {
+      clearInterval(id);
       supabase.removeChannel(channel);
     };
-  }, [clinic?.id, bumpUpdated]);
+  }, [clinic?.id, clinic?.timezone, loadFollowups]);
 
   // Averages feed the smart timer coloring; a new visit finishing every so
   // often is enough reason to refresh rather than needing this instantly.
@@ -328,42 +281,7 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
     return () => clearInterval(id);
   }, [clinic, loadHistory]);
 
-  // Start/End Day changes reflected live so every tablet's status agrees.
-  useEffect(() => {
-    if (!clinic) return;
-    const channel = supabase
-      .channel(`clinic-days-${clinic.id}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "clinic_days", filter: `clinic_id=eq.${clinic.id}` },
-        () => {
-          bumpUpdated();
-          loadDays(clinic.id);
-        }
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [clinic, loadDays, bumpUpdated]);
-
   const staffById = useMemo(() => Object.fromEntries(staff.map((s) => [s.id, s])), [staff]);
-
-  const activeRequestsByRoom = useMemo(() => {
-    const map: Record<string, Record<string, RoomRequest>> = {};
-    roomRequests.forEach((r) => {
-      (map[r.room_id] ||= {})[r.key] = r;
-    });
-    return map;
-  }, [roomRequests]);
-
-  const unclaimedRoomIds = useMemo(() => {
-    const set = new Set<string>();
-    roomRequests.forEach((r) => {
-      if (!r.acknowledged_at) set.add(r.room_id);
-    });
-    return set;
-  }, [roomRequests]);
 
   const { avgByStage, countByStage } = useMemo(() => {
     const sums: Partial<Record<Stage, number>> = {};
@@ -385,42 +303,81 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
     return { avgByStage: avg, countByStage: counts };
   }, [history]);
 
-  async function rpc<T = unknown>(name: string, params?: Record<string, unknown>): Promise<ActionResult & { data?: T }> {
-    if (!connectedRef.current) return { ...OFFLINE_ERROR };
-    const { data, error: rpcErr } = await supabase.rpc(name, params);
-    if (rpcErr) return { ok: false, error: rpcErr.message };
-    return { ok: true, data: data as T };
-  }
-
-  const advanceStage = useCallback(async (roomId: string) => {
-    const res = await rpc<string | null>("advance_room_stage", { p_room_id: roomId });
-    return { ...res, historyId: res.data ?? null };
+  const advanceStage = useCallback(async (roomId: string, opts?: AdvanceOptions) => {
+    await supabase.rpc("advance_room_stage", {
+      p_room_id: roomId,
+      p_target: opts?.target ?? null,
+      p_expected_stage: opts?.expected ?? null,
+      p_add_callback: opts?.addCallback ?? false
+    });
   }, []);
 
+  const refreshFollowups = useCallback(() => {
+    if (clinic) loadFollowups(clinic.id, clinic.timezone);
+  }, [clinic, loadFollowups]);
+
+  const setSampleBoxed = useCallback(
+    async (sampleId: string, boxed: boolean) => {
+      await supabase.rpc("set_sample_boxed", { p_sample_id: sampleId, p_boxed: boxed });
+      refreshFollowups();
+    },
+    [refreshFollowups]
+  );
+
+  const removeSample = useCallback(
+    async (sampleId: string) => {
+      await supabase.rpc("remove_lab_sample", { p_sample_id: sampleId });
+      refreshFollowups();
+    },
+    [refreshFollowups]
+  );
+
+  const setDloCalled = useCallback(
+    async (called: boolean) => {
+      if (!clinic) return;
+      await supabase.rpc("set_dlo_called", { p_clinic_id: clinic.id, p_called: called });
+      refreshFollowups();
+    },
+    [clinic, refreshFollowups]
+  );
+
+  const setCallbackStatus = useCallback(
+    async (callbackId: string, status: CallbackStatus) => {
+      await supabase.rpc("set_callback_status", { p_callback_id: callbackId, p_status: status });
+      refreshFollowups();
+    },
+    [refreshFollowups]
+  );
+
+  const removeCallback = useCallback(
+    async (callbackId: string) => {
+      await supabase.rpc("remove_callback", { p_callback_id: callbackId });
+      refreshFollowups();
+    },
+    [refreshFollowups]
+  );
+
   const setLockout = useCallback(async (roomId: string, on: boolean) => {
-    return rpc("set_lockout", { p_room_id: roomId, p_on: on });
+    await supabase.rpc("set_lockout", { p_room_id: roomId, p_on: on });
+  }, []);
+
+  const toggleRequest = useCallback(async (roomId: string, key: string) => {
+    await supabase.rpc("toggle_request", { p_room_id: roomId, p_key: key });
   }, []);
 
   const setNote = useCallback(async (roomId: string, note: string | null) => {
-    await rpc("set_room_note", { p_room_id: roomId, p_note: note ?? "", p_author: staffNameRef.current });
+    await supabase.rpc("set_room_note", { p_room_id: roomId, p_note: note ?? "" });
   }, []);
 
-  const assignPatient = useCallback(async (roomId: string, label?: string | null) => {
-    const res = await rpc<string | null>("assign_patient", { p_room_id: roomId, p_label: label ?? null });
-    return { ...res, ticket: res.data ?? null };
-  }, []);
-
-  const setPatientLabel = useCallback(async (roomId: string, label: string | null) => {
-    return rpc("set_patient_label", { p_room_id: roomId, p_label: label ?? "" });
-  }, []);
-
-  const markProviderFinished = useCallback(async (roomId: string) => {
-    return rpc("mark_provider_finished", { p_room_id: roomId });
+  const assignPatient = useCallback(async (roomId: string) => {
+    const { data, error: rpcErr } = await supabase.rpc("assign_patient", { p_room_id: roomId });
+    if (rpcErr) return null;
+    return (data as string) ?? null;
   }, []);
 
   const setStaffing = useCallback(
     async (roomId: string, nurseId: string | null, doctorId: string | null) => {
-      await rpc("set_room_staffing", {
+      await supabase.rpc("set_room_staffing", {
         p_room_id: roomId,
         p_nurse_id: nurseId,
         p_doctor_id: doctorId
@@ -432,24 +389,16 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
   const setRoomCount = useCallback(
     async (count: number) => {
       if (!clinic) return;
-      const res = await rpc("set_clinic_room_count", { p_clinic_id: clinic.id, p_count: count });
-      if (res.ok) setClinic({ ...clinic, room_count: count });
+      await supabase.rpc("set_clinic_room_count", { p_clinic_id: clinic.id, p_count: count });
+      setClinic({ ...clinic, room_count: count });
     },
     [clinic]
   );
-
-  const resetDoctorIdle = useCallback(async (): Promise<ActionResult> => {
-    if (!clinic) return { ok: false, error: "No clinic loaded." };
-    const res = await rpc("reset_doctor_idle", { p_clinic_id: clinic.id });
-    if (res.ok) setClinic({ ...clinic, idle_reset_at: new Date().toISOString() });
-    return res;
-  }, [clinic]);
 
   // Up to MAX_STAFF_PER_ROLE providers and MAX_STAFF_PER_ROLE nurses. Returns
   // an error message string on failure (e.g. cap reached), null on success.
   const addStaff = useCallback(
     async (role: StaffRole) => {
-      if (!connectedRef.current) return OFFLINE_ERROR.error!;
       if (!clinic) return "No clinic loaded.";
       const currentOfRole = staff.filter((s) => s.role === role);
       if (currentOfRole.length >= MAX_STAFF_PER_ROLE) {
@@ -472,149 +421,71 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
     await supabase.from("staff").update({ name }).eq("id", staffId);
   }, []);
 
-  const removeStaff = useCallback(async (staffId: string): Promise<ActionResult> => {
-    if (!connectedRef.current) return { ...OFFLINE_ERROR };
+  const removeStaff = useCallback(async (staffId: string) => {
     // Rooms pointing at this person fall back to "any nurse/provider"
     // automatically (schema uses ON DELETE SET NULL on those two columns).
-    // Historical room_history rows store the name as plain text, so past
-    // activity is untouched by this delete.
-    const { error: delErr } = await supabase.from("staff").delete().eq("id", staffId);
-    if (delErr) return { ok: false, error: delErr.message };
-    // Realtime normally removes it from local state, but update optimistically
-    // too so a slow/rare missed event doesn't make the button look like a no-op.
-    setStaff((prev) => prev.filter((s) => s.id !== staffId));
-    return { ok: true };
+    await supabase.from("staff").delete().eq("id", staffId);
   }, []);
 
-  const toggleFlash = useCallback(async (roomId: string, on: boolean) => {
-    await rpc("toggle_room_flash", { p_room_id: roomId, p_on: on });
-  }, []);
-
-  const startDay = useCallback(async () => {
-    if (!clinic) return { ok: false, error: "No clinic loaded." };
-    const res = await rpc("start_clinic_day", { p_clinic_id: clinic.id });
-    await loadDays(clinic.id);
-    return res;
-  }, [clinic, loadDays]);
-
-  const endDay = useCallback(async () => {
-    if (!clinic) return { ok: false, error: "No clinic loaded." };
-    const res = await rpc("end_clinic_day", { p_clinic_id: clinic.id });
-    await loadDays(clinic.id);
-    return res;
-  }, [clinic, loadDays]);
-
-  const createRequest = useCallback(async (roomId: string, key: string) => {
-    const res = await rpc<string | null>("create_room_request", {
-      p_room_id: roomId,
-      p_key: key,
-      p_created_by: staffNameRef.current
-    });
-    return { ...res, requestId: res.data ?? null };
-  }, []);
-
-  const acknowledgeRequest = useCallback(async (requestId: string, by: string) => {
-    return rpc("acknowledge_room_request", { p_request_id: requestId, p_by: by });
-  }, []);
-
-  const clearRequest = useCallback(async (requestId: string) => {
-    return rpc("clear_room_request", { p_request_id: requestId });
-  }, []);
-
-  // Undo for "clear/complete a request": a cleared request is a terminal
-  // state nothing else writes to, so this just needs to flip cleared_at
-  // back to null — no concurrency check required like restoreRoomSnapshot's.
-  const restoreRequest = useCallback(async (requestId: string): Promise<ActionResult> => {
-    if (!connectedRef.current) return { ...OFFLINE_ERROR };
-    const { error: updErr, data } = await supabase
-      .from("room_requests")
-      .update({ cleared_at: null })
-      .eq("id", requestId)
-      .not("cleared_at", "is", null)
-      .select("id");
-    if (updErr) return { ok: false, error: updErr.message };
-    if (!data || data.length === 0) return { ok: false, error: "Can't undo — this was already changed." };
-    return { ok: true }; // realtime delivers the restored row to every connected view
-  }, []);
-
-  const resetPeriod = useCallback(
-    async (since: string | null, until: string | null) => {
-      if (!clinic) return { ok: false, error: "No clinic loaded." };
-      const res = await rpc("reset_period_data", { p_clinic_id: clinic.id, p_since: since, p_until: until });
-      if (res.ok) {
-        await Promise.all([loadHistory(clinic.id), loadDays(clinic.id)]);
-      }
-      return res;
-    },
-    [clinic, loadHistory, loadDays]
+  // Rooms beyond the clinic's "rooms in service" setting are hidden everywhere
+  // (room tabs, board, front desk, waiting room, admin), per the original spec.
+  const visibleRooms = useMemo(
+    () => (clinic ? rooms.filter((r) => r.room_number <= clinic.room_count) : rooms),
+    [rooms, clinic]
   );
 
-  // Generic Undo support: writes a captured snapshot of a room's fields back,
-  // but only if nobody else has touched the row since (compares updated_at)
-  // — otherwise it would silently clobber a newer change from someone else.
-  // Optionally deletes a room_history row a stage-advance created, so undoing
-  // a stage change doesn't leave a phantom "completed stage" in the analytics.
-  const restoreRoomSnapshot = useCallback(
-    async (roomId: string, snapshot: Partial<Room>, expectedUpdatedAt: string, historyIdToDelete?: string | null) => {
-      if (!connectedRef.current) return { ...OFFLINE_ERROR };
-      const { data: current } = await supabase.from("rooms").select("updated_at").eq("id", roomId).single();
-      if (!current || current.updated_at !== expectedUpdatedAt) {
-        return { ok: false, error: "Can't undo — this was already updated by someone else." };
-      }
-      const { error: updErr } = await supabase
-        .from("rooms")
-        .update({ ...snapshot, updated_at: new Date().toISOString() })
-        .eq("id", roomId);
-      if (updErr) return { ok: false, error: updErr.message };
-      if (historyIdToDelete) {
-        await supabase.from("room_history").delete().eq("id", historyIdToDelete);
-      }
-      return { ok: true };
-    },
-    []
-  );
+  const followups = useMemo<FollowupSummary>(() => {
+    const tz = clinic?.timezone;
+    const today = clinicToday(tz);
+    const todaySamples = labSamples.filter((s) => s.pickup_date === today);
+    const earlierOpenSamples = labSamples.filter((s) => s.pickup_date < today && !s.boxed_at);
+    const dloCalledAt = labPickups.find((p) => p.pickup_date === today)?.dlo_called_at ?? null;
+    const waitingCallbacks = callbacks.filter((c) => c.status === "waiting");
+    const readyCallbacks = callbacks.filter((c) => c.status === "ready");
+    const doneTodayCallbacks = callbacks.filter(
+      (c) => c.status === "called" && c.called_at && dateKeyInTz(c.called_at, tz) === today
+    );
+    const unboxed = [...earlierOpenSamples, ...todaySamples].filter((s) => !s.boxed_at).length;
+    const needsDloCall = todaySamples.length > 0 && !dloCalledAt ? 1 : 0;
+    return {
+      todaySamples,
+      earlierOpenSamples,
+      dloCalledAt,
+      waitingCallbacks,
+      readyCallbacks,
+      doneTodayCallbacks,
+      attentionCount: unboxed + needsDloCall + readyCallbacks.length
+    };
+  }, [labSamples, labPickups, callbacks, clinic?.timezone]);
 
   const value: ClinicContextValue = {
     clinic,
+    followups,
+    hallways,
     staff,
     staffById,
-    rooms,
-    roomRequests,
-    activeRequestsByRoom,
-    unclaimedRoomIds,
+    rooms: visibleRooms,
     history,
-    today,
-    pastDays,
     avgByStage,
     countByStage,
     loading,
     error,
-    connected,
-    lastUpdatedAt,
-    staffName: staffNameState,
-    setStaffName,
     actions: {
       advanceStage,
+      setSampleBoxed,
+      removeSample,
+      setDloCalled,
+      setCallbackStatus,
+      removeCallback,
       setLockout,
+      toggleRequest,
       setNote,
       assignPatient,
-      setPatientLabel,
-      markProviderFinished,
       setStaffing,
       setRoomCount,
-      resetDoctorIdle,
       addStaff,
       renameStaff,
-      removeStaff,
-      toggleFlash,
-      startDay,
-      endDay,
-      createRequest,
-      acknowledgeRequest,
-      clearRequest,
-      restoreRequest,
-      resetPeriod,
-      restoreRoomSnapshot
+      removeStaff
     }
   };
 

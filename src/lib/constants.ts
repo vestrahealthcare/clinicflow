@@ -3,22 +3,23 @@ import { Stage } from "./types";
 export const STAGE_LABEL: Record<Stage, string> = {
   vacant: "Vacant",
   ready_for_nurse: "Ready for nurse",
-  prepping: "Nurse in room",
+  prepping: "Prepping",
   ready_for_doctor: "Ready for doctor",
   with_doctor: "Doctor in room",
+  shots: "Shots",
+  other: "Other (nurse task)",
   needs_cleanup: "Needs cleanup"
 };
 
 // Stage the room-tablet's big button advances to, and its label. Vacant has
 // none: only the front desk can move a room out of vacant (assign_patient).
-// with_doctor -> vacant directly: the cleanup step is skipped on the live
-// floor now (needs_cleanup -> vacant only still matters for any room that
-// was already mid-cleanup before that change shipped).
 export const NEXT_STAGE: Partial<Record<Stage, Stage>> = {
   ready_for_nurse: "prepping",
   prepping: "ready_for_doctor",
   ready_for_doctor: "with_doctor",
-  with_doctor: "vacant",
+  with_doctor: "needs_cleanup",
+  shots: "needs_cleanup",
+  other: "needs_cleanup",
   needs_cleanup: "vacant"
 };
 
@@ -26,7 +27,9 @@ export const ACTION_LABEL: Partial<Record<Stage, string>> = {
   ready_for_nurse: "Start prep (nurse in room)",
   prepping: "Prep complete, ready for doctor",
   ready_for_doctor: "Start visit",
-  with_doctor: "End visit",
+  with_doctor: "Pt departed",
+  shots: "Pt departed",
+  other: "Pt departed",
   needs_cleanup: "Mark room clean"
 };
 
@@ -36,6 +39,8 @@ export const THRESH_MIN: Partial<Record<Stage, number>> = {
   prepping: 8,
   ready_for_doctor: 10,
   with_doctor: 20,
+  shots: 10,
+  other: 10,
   needs_cleanup: 8
 };
 
@@ -44,6 +49,8 @@ export const STAGE_ORDER: Stage[] = [
   "prepping",
   "ready_for_doctor",
   "with_doctor",
+  "shots",
+  "other",
   "needs_cleanup"
 ];
 
@@ -59,12 +66,7 @@ export const ROLE_COLOR = {
   nurse: "#2F9E6E"
 } as const;
 
-export const MAX_STAFF_PER_ROLE = 20;
-
-// Default operating hours shown on the Admin day controls; Start/End Day are
-// always manual (staff press the button), this is just the expected window.
-export const SCHEDULED_DAY_START = "09:00";
-export const SCHEDULED_DAY_END = "17:00";
+export const MAX_STAFF_PER_ROLE = 6;
 
 // Smart overdue coloring: white/default while normal, yellow once a room is
 // running meaningfully over the clinic's own recent average for that step,
@@ -94,15 +96,18 @@ export const REQUEST_GROUPS: { title: string; items: RequestDef[] }[] = [
     title: "Clinical support",
     items: [
       { key: "nurse", label: "Call nurse" },
-      { key: "chaperone", label: "Chaperone" },
-      { key: "ecg", label: "ECG" },
       { key: "vitals", label: "Vitals" },
-      { key: "lab", label: "Lab" },
-      { key: "injection", label: "Injection" },
-      { key: "dietitian", label: "Dietitian" },
-      { key: "careManagement", label: "Care Management" },
-      { key: "referral", label: "Referral" },
-      { key: "imaging", label: "Imaging" }
+      { key: "nextPatient", label: "Next patient in" },
+      { key: "hgb", label: "Hgb" },
+      { key: "fluoride", label: "Fluoride" },
+      { key: "glucose", label: "Glucose" },
+      { key: "urinalysis", label: "Urinalysis" },
+      { key: "hcg", label: "HCG" },
+      { key: "throat_culture", label: "Throat culture" },
+      { key: "strep_culture", label: "Strep culture" },
+      { key: "viral_panel", label: "Viral panel" },
+      { key: "sendout_lab", label: "Send out lab" },
+      { key: "nebulizer", label: "Nebulizer" }
     ]
   }
 ];
@@ -111,7 +116,21 @@ export const REQUEST_LABEL: Record<string, string> = Object.fromEntries(
   REQUEST_GROUPS.flatMap((g) => g.items.map((i) => [i.key, i.label]))
 );
 
-// No login system — this is just a per-device convenience so the same
-// tablet/staff member doesn't retype their name every time they post to the
-// huddle board or claim a request.
-export const STAFF_NAME_KEY = "clinicflow_staff_name";
+// Urgent flags that should flash on the central board (per Nick: flash, no sound).
+export const URGENT_REQUEST_KEYS = ["nurse"];
+
+// Tests whose results may still be pending when the patient leaves. If any of
+// these are still marked on the room at "Pt departed", the room asks whether to
+// add the patient to the "Call with results" list.
+export const TEST_KEYS = ["rsv", "flu", "strep", "covid"];
+
+// Requests that create a DLO pickup reminder (sample goes in the pickup box,
+// and someone calls DLO to come get it).
+export const LAB_PICKUP_KEYS = ["throat_culture", "strep_culture", "viral_panel", "sendout_lab"];
+
+// Call with results timers (minutes). Placeholders until we know how long the
+// molecular tests really take at Red Berry; adjust here.
+export const CALLBACK_WAITING_YELLOW_MIN = 30;
+export const CALLBACK_WAITING_RED_MIN = 60;
+export const CALLBACK_READY_YELLOW_MIN = 10;
+export const CALLBACK_READY_RED_MIN = 30;

@@ -8,7 +8,7 @@ import { CallRow } from "@/lib/types";
 const WINDOW_MS = 6 * 60_000;
 
 export default function WaitingPage() {
-  const { clinic, rooms } = useClinic();
+  const { clinic, rooms, hallways } = useClinic();
   const [calls, setCalls] = useState<CallRow[]>([]);
 
   useEffect(() => {
@@ -53,11 +53,15 @@ export default function WaitingPage() {
       <div className="space-y-3">
         {calls.slice(0, 8).map((c) => {
           const room = rooms.find((r) => r.id === c.room_id);
+          const hallway = room ? hallways.find((h) => h.id === room.hallway_id) : null;
           if (!room) return null;
           return (
             <div key={c.id} className="card px-7 py-5 flex justify-between items-center">
-              <span className="font-mono text-2xl font-semibold">{room.patient_label ?? c.ticket}</span>
-              <span className="text-xl font-semibold flex items-center">{room.name}</span>
+              <span className="font-mono text-2xl font-semibold">{c.ticket}</span>
+              <span className="text-xl font-semibold flex items-center">
+                <span className="hall-dot" style={{ backgroundColor: hallway?.color }} />
+                {room.name}, {hallway?.label}
+              </span>
             </div>
           );
         })}
