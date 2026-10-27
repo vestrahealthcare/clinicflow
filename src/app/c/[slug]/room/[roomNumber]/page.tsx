@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useClinic } from "@/lib/clinicContext";
 import { LiveTimer } from "@/components/LiveTimer";
 import { ClaimPicker } from "@/components/ClaimPicker";
+import { BlackStage } from "@/components/BlackStage";
 import {
   STAGE_LABEL,
   ACTION_LABEL,
@@ -38,9 +39,12 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
 
   if (!room)
     return (
-      <div className="text-slate-500">
-        Room {params.roomNumber} is not in service. Pick a room above, or change &ldquo;Rooms in service&rdquo; in Admin.
-      </div>
+      <BlackStage>
+        <div className="text-slate-400">
+          Room {params.roomNumber} is not in service. Pick a room above, or change &ldquo;Rooms in service&rdquo; in
+          Admin.
+        </div>
+      </BlackStage>
     );
 
   const color = personColor(room);
@@ -77,7 +81,7 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
   };
 
   return (
-    <div>
+    <BlackStage>
       <div className="flex flex-wrap gap-2 mb-5">
         {rooms.map((r) => {
           const h = hallways.find((x) => x.id === r.hallway_id);
@@ -396,6 +400,6 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
           </>
         )}
       </div>
-    </div>
+    </BlackStage>
   );
 }

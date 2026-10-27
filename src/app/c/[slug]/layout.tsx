@@ -49,12 +49,15 @@ function TopNav({ slug }: { slug: string }) {
 
 function ClinicShell({ slug, children }: { slug: string; children: React.ReactNode }) {
   const { loading, error } = useClinic();
+  const pathname = usePathname();
+  // The Fishbowl board uses the whole screen so every room fits on one screen.
+  const wide = pathname?.includes("/board");
   if (loading) return <div className="p-10 text-slate-500">Loading clinic…</div>;
   if (error) return <div className="p-10 text-red-600">{error}</div>;
   return (
     <div className="min-h-full flex flex-col">
       <TopNav slug={slug} />
-      <main className="flex-1 p-5 max-w-6xl w-full mx-auto">{children}</main>
+      <main className={`flex-1 p-5 w-full mx-auto ${wide ? "max-w-none" : "max-w-6xl"}`}>{children}</main>
     </div>
   );
 }

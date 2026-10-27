@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useClinic } from "@/lib/clinicContext";
 import { LiveTimer } from "@/components/LiveTimer";
 import { Legend } from "@/components/Legend";
 import { FollowupStrip } from "@/components/FollowupStrip";
 import { ClaimPicker } from "@/components/ClaimPicker";
+import { BlackStage } from "@/components/BlackStage";
 import { STAGE_LABEL } from "@/lib/constants";
 import { attentionItems, flashKind, FLASH_CLASS, isOverdue, personColor, personLabel } from "@/lib/util";
 
@@ -15,17 +16,11 @@ export default function BoardPage({ params }: { params: { slug: string } }) {
   // "roomId:itemKey" of the item currently choosing a name.
   const [claiming, setClaiming] = useState<string | null>(null);
 
-  // Fishbowl look: black page behind white room squares.
-  useEffect(() => {
-    document.body.classList.add("fishbowl");
-    return () => document.body.classList.remove("fishbowl");
-  }, []);
-
   return (
-    <div>
+    <BlackStage>
       <FollowupStrip slug={params.slug} />
       <Legend />
-      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))" }}>
+      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))" }}>
         {rooms.map((room) => {
           const hallway = hallways.find((h) => h.id === room.hallway_id);
           const color = personColor(room);
@@ -44,7 +39,7 @@ export default function BoardPage({ params }: { params: { slug: string } }) {
             >
               {/* Tapping the top of the card opens the room's tablet page. */}
               <Link href={`/c/${params.slug}/room/${room.room_number}`} className="block p-4 pb-2">
-                <div className="flex justify-between font-bold text-sm mb-0.5">
+                <div className="flex justify-between font-bold text-[21px] leading-tight mb-1">
                   <span>
                     <span className="hall-dot" style={{ backgroundColor: hallway?.color ?? "#999" }} />
                     {room.name}
@@ -123,6 +118,6 @@ export default function BoardPage({ params }: { params: { slug: string } }) {
           );
         })}
       </div>
-    </div>
+    </BlackStage>
   );
 }

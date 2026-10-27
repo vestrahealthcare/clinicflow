@@ -5,6 +5,7 @@ import { useClinic } from "@/lib/clinicContext";
 import { LiveTimer } from "@/components/LiveTimer";
 import { Legend } from "@/components/Legend";
 import { ClaimPicker } from "@/components/ClaimPicker";
+import { BlackStage } from "@/components/BlackStage";
 import { STAGE_LABEL, FOLLOWUP_TIMEFRAME_LABEL, FOLLOWUP_REASON_LABEL } from "@/lib/constants";
 import { roomDirections } from "@/lib/util";
 
@@ -42,7 +43,7 @@ export default function FrontDeskPage() {
   const lastHallway = lastRoom ? hallways.find((h) => h.id === lastRoom.hallway_id) : null;
 
   return (
-    <div>
+    <BlackStage>
       {lastRoom && (
         <div className="card p-4 mb-5 bg-emerald-50 dark:bg-emerald-950 border-emerald-500 flex items-center justify-between gap-3 flex-wrap">
           <span className="font-semibold text-emerald-700 dark:text-emerald-300">
@@ -300,6 +301,6 @@ export default function FrontDeskPage() {
           </tbody>
         </table>
       </div>
-    </div>
+    </BlackStage>
   );
 }
