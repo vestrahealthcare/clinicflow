@@ -61,4 +61,4 @@ body {
 
 /* Black background pages (Fishbowl board, Room view, Front desk): white squares on black. */
 body.blackbg { background: #000; }
-body.blackbg .card, body.blackbg .chip { color: #0f172a; }
+body.blackbg .light .card, body.blackbg .light .chip { color: #0f172a; }
