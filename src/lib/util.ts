@@ -1,5 +1,7 @@
 import { Hallway, Room, Stage } from "./types";
 import {
+  BOX_COLOR,
+  FLASH_COLOR,
   THRESH_MIN,
   HOUSEKEEPING_COLOR,
   VACANT_COLOR,
@@ -81,8 +83,11 @@ export function personLabel(
     room.stage === "other"
   ) {
     const s = room.assigned_nurse_id ? staffById[room.assigned_nurse_id] : null;
-    // Once prep has been started the nurse is in the room, so say so.
-    if (room.stage === "prepping") return s ? `Nurse in progress: ${s.name}` : "Nurse in progress";
+    // Once prep has been started the nurse is in the room, so say which nurse tapped Start prep.
+    if (room.stage === "prepping") {
+      const who = room.prep_by || s?.name;
+      return who ? `Nurse in progress: ${who}` : "Nurse in progress";
+    }
     return s ? `Nurse: ${s.name}` : "Nurse needed";
   }
   const d = room.assigned_doctor_id ? staffById[room.assigned_doctor_id] : null;
@@ -151,6 +156,25 @@ export const FLASH_CLASS: Record<"lockout" | FlashKind, string> = {
   support: "flash-blue",
   message: "flash-orange"
 };
+
+/** The solid color of a room's square on the Fishbowl board. */
+export function boxColor(room: Room): string {
+  if (room.contaminated) return BOX_COLOR.lockout;
+  if (room.stage === "vacant") return BOX_COLOR.vacant;
+  if (room.stage === "ready_for_doctor") return BOX_COLOR.readyForDoctor;
+  return BOX_COLOR.occupied;
+}
+
+/**
+ * The two colors a flashing square blinks between: its own color, and the flash color.
+ * When the flash color is the same as the square (a blue test request on a blue square,
+ * or a lockout on the red square) it blinks to white instead so it still shows.
+ */
+export function flashColors(room: Room, kind: "lockout" | FlashKind): [string, string] {
+  const base = boxColor(room);
+  const flash = FLASH_COLOR[kind];
+  return [base, flash.toLowerCase() === base.toLowerCase() ? "#FFFFFF" : flash];
+}
 
 /** True when the room should flash on the board. */
 export function needsAttention(room: Room): boolean {

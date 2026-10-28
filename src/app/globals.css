@@ -59,6 +59,14 @@ body {
 .flash-pink { animation: flash-pink-kf 1.1s ease-in-out infinite; }
 .flash-orange { animation: flash-orange-kf 1.1s ease-in-out infinite; }
 
+/* Fishbowl squares: the whole square blinks between its own color (--fb-a) and the flash
+   color (--fb-b). No overlay, no glow. */
+@keyframes fb-blink-kf {
+  0%, 45% { background-color: var(--fb-a); }
+  55%, 100% { background-color: var(--fb-b); }
+}
+.fb-flash { animation: fb-blink-kf 1.1s ease-in-out infinite; }
+
 /* Black background pages (Fishbowl board, Room view, Front desk): white squares on black. */
 body.blackbg { background: #000; }
 body.blackbg .light .card, body.blackbg .light .chip { color: #0f172a; }

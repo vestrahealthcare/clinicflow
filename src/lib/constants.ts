@@ -17,10 +17,9 @@ export const NEXT_STAGE: Partial<Record<Stage, Stage>> = {
   ready_for_nurse: "prepping",
   prepping: "ready_for_doctor",
   ready_for_doctor: "with_doctor",
-  with_doctor: "needs_cleanup",
-  shots: "needs_cleanup",
-  other: "needs_cleanup",
-  needs_cleanup: "vacant"
+  with_doctor: "vacant",
+  shots: "vacant",
+  other: "vacant"
 };
 
 export const ACTION_LABEL: Partial<Record<Stage, string>> = {
@@ -30,7 +29,7 @@ export const ACTION_LABEL: Partial<Record<Stage, string>> = {
   with_doctor: "Check-out",
   shots: "Check-out",
   other: "Check-out",
-  needs_cleanup: "Mark room clean"
+  needs_cleanup: "Mark room clean" // only for a room still left in the old cleaning step
 };
 
 // Minutes in a stage before the room flashes overdue on the board.
@@ -40,8 +39,7 @@ export const THRESH_MIN: Partial<Record<Stage, number>> = {
   ready_for_doctor: 10,
   with_doctor: 20,
   shots: 10,
-  other: 10,
-  needs_cleanup: 8
+  other: 10
 };
 
 export const STAGE_ORDER: Stage[] = [
@@ -50,8 +48,7 @@ export const STAGE_ORDER: Stage[] = [
   "ready_for_doctor",
   "with_doctor",
   "shots",
-  "other",
-  "needs_cleanup"
+  "other"
 ];
 
 export const HOUSEKEEPING_COLOR = "#8A5A34";
@@ -74,12 +71,23 @@ export const MAX_STAFF: Record<"doctor" | "nurse" | "frontdesk", number> = {
   frontdesk: 20
 };
 
-// Fishbowl flash colors: tests and support requests blue, Shots pink, messages orange.
-// Red is kept for contamination lockout. Follow up requests do not flash.
+// Fishbowl square colors. The whole square is one solid color:
+//   vacant white, occupied light gray, ready for doctor blue, contamination lockout red.
+export const BOX_COLOR = {
+  vacant: "#FFFFFF",
+  occupied: "#E2E8F0",
+  readyForDoctor: "#60A5FA",
+  lockout: "#EF4444"
+} as const;
+
+// Fishbowl flash colors: the whole square blinks between its own color and the flash color
+// (or white, when the flash color is the same as the square). Tests and support requests
+// blue, Shots pink, messages orange, contamination lockout red. Follow ups never flash.
 export const FLASH_COLOR = {
-  support: "#2563EB",
-  shots: "#EC4899",
-  message: "#F97316"
+  support: "#60A5FA",
+  shots: "#F472B6",
+  message: "#FB923C",
+  lockout: "#EF4444"
 } as const;
 
 // Smart overdue coloring: white/default while normal, yellow once a room is

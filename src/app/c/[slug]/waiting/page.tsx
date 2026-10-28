@@ -33,6 +33,16 @@ export default function WaitingPage() {
         { event: "INSERT", schema: "public", table: "calls", filter: `clinic_id=eq.${clinic.id}` },
         (payload) => setCalls((prev) => [payload.new as CallRow, ...prev].slice(0, 8))
       )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "calls", filter: `clinic_id=eq.${clinic.id}` },
+        // Change room moves a call to the new room and refreshes its time.
+        (payload) =>
+          setCalls((prev) => {
+            const row = payload.new as CallRow;
+            return [row, ...prev.filter((c) => c.id !== row.id)].slice(0, 8);
+          })
+      )
       .subscribe();
 
     // Age out old entries every 30s without a full refetch.

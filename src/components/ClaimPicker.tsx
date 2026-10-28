@@ -8,7 +8,16 @@ import { useClinic } from "@/lib/clinicContext";
  * Roster names are one tap; anyone else can type a name. It does not change the
  * name set at the top, so a shared tablet never silently credits the wrong person.
  */
-export function ClaimPicker({ onPick, onCancel }: { onPick: (name: string) => void; onCancel: () => void }) {
+export function ClaimPicker({
+  onPick,
+  onCancel,
+  prompt
+}: {
+  onPick: (name: string) => void;
+  onCancel: () => void;
+  /** Question shown above the names. Defaults to "Who has it?". */
+  prompt?: string;
+}) {
   const { staff } = useClinic();
   const [typed, setTyped] = useState("");
 
@@ -22,7 +31,7 @@ export function ClaimPicker({ onPick, onCancel }: { onPick: (name: string) => vo
   return (
     <div className="mt-2 p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100">
       <div className="text-xs text-slate-500 mb-2">
-        Who has it? Tip: set your name at the top of the page and this becomes one tap.
+        {prompt ?? "Who has it?"} Tip: set your name at the top of the page and this becomes one tap.
       </div>
       <div className="flex flex-wrap gap-2 mb-2">
         {roster.map((n) => (

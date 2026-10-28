@@ -19,6 +19,7 @@ supabase/schema.sql       All tables, security policies, and the database
                           with 12 rooms, 3 hallways, 2 nurses, 2 providers.
 supabase/update_2026_10_27.sql
 supabase/update_2026_10_27b.sql
+supabase/update_2026_10_28.sql
                           (the latest, includes everything in the earlier
                           second update). Upgrades for a project that already ran an older
                           schema.sql. Run them in order in the SQL editor,
@@ -118,8 +119,9 @@ nurse roster from its own Admin page after that.
   until check-out. Initials are a patient identifier stored in an open,
   no login database, so have your privacy officer approve this before real
   patients are entered.
-- **Check-out.** Replaces "Pt departed" in the room. The room goes to
-  cleanup, the patient moves to a "Checking out" list on the waiting room
+- **Check-out.** Replaces "Pt departed" in the room. There is no cleaning
+  step: the room goes straight to Vacant (use Contamination lockout for a
+  deep clean), the patient moves to a "Checking out" list on the waiting room
   screen and the front desk, and the room is cleared of initials, requests
   and messages. Tapping **Pt departed** there removes the patient and their
   initials for good.
@@ -130,10 +132,21 @@ nurse roster from its own Admin page after that.
   "I've got it" button. The person picks their name from the roster or types
   one, and "Name has it" shows on the room and board. The button is on
   both the board card and the room page.
-- **Flashing.** On the black Fishbowl board each room is a white square. A
-  room flashes blue for tests and support requests, pink for Shots, and
-  orange for a message, until each has an "I've got it". Contamination
-  lockout flashes red. Follow up requests do not flash.
+- **Fishbowl colors.** The whole square is one solid color: white when
+  vacant, light gray when occupied, blue at Ready for doctor, red in
+  Contamination lockout. There are no role colors or legend any more.
+- **Flashing.** The whole square blinks between its own color and the flash
+  color: blue for tests and support requests, pink for Shots, orange for a
+  message, until each has an "I've got it". When the flash color matches the
+  square (a test on a blue square, or lockout on the red square) it blinks
+  with white. Contamination lockout flashes red. Follow up requests do not
+  flash. Squares are all the same size and fill the screen.
+- **Prep nurse.** Start prep records the nurse's name (from "Who are you?",
+  or a picker if no name is set) and the board shows "Nurse in progress: name".
+- **Change room.** A button on the room page and on each occupied row of the
+  front desk's Rest of the floor list moves a checked in patient to a vacant
+  room, keeping initials, ticket, step, timer, requests, message and follow
+  up. The old room goes back to Vacant.
 - **Who are you.** "Who are you?" at the top of every page: pick a name from
   the roster or type one. It is remembered on that device, and "I've got it"
   then uses it in one tap. If no name is set, the button asks.
@@ -141,6 +154,9 @@ nurse roster from its own Admin page after that.
   the room's usual provider, any provider, or a specific person.
 - **Follow up reasons** include WCC, plus a free text note that goes to the
   front desk. **Call with results** tasks have a free text Results box.
+- **Timing averages** (Admin). Reset 30 day averages starts the averages
+  fresh from now and keeps the old data. Erase all timing history deletes it
+  for good, after a warning to verify with your administrator.
 - **Reset for the day** (Admin) sends all rooms to Vacant, clears the
   Checking out list and restarts ticket numbers. History, lab samples and
   open results calls are kept.
@@ -156,14 +172,10 @@ nurse roster from its own Admin page after that.
 
 ## How the colors work
 
-Color is by role, not by person: every provider is blue, every nurse is
-green, everywhere in the app, no matter which of up to 6 providers or 6
-nurses is actually on duty. The front desk can assign a specific named
-person to a room, or leave it as "Any nurse" or "Any provider", and either
-way the color stays the same. The specific name, when there is one, shows as
-text next to the room so staff can get more specific without needing to
-memorize a color per person. Housekeeping (needs cleanup) and contamination
-lockout each get their own fixed color too.
+On the Fishbowl board the color shows the room's status: white vacant, light
+gray occupied, blue ready for the doctor, red contamination lockout. A
+flashing square means someone is being asked for something (see Flashing
+above). The specific nurse or provider shows as text on the square.
 
 ## How the timer coloring works
 

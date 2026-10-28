@@ -3,7 +3,6 @@
 import { useMemo } from "react";
 import { useClinic } from "@/lib/clinicContext";
 import { LiveTimer } from "@/components/LiveTimer";
-import { Legend } from "@/components/Legend";
 import { StaffRoster } from "@/components/StaffRoster";
 import { STAGE_LABEL, STAGE_ORDER, THRESH_MIN } from "@/lib/constants";
 import { formatMinutes, isOverdue, computeDoctorIdleTime } from "@/lib/util";
@@ -57,6 +56,117 @@ function ResetDayCard({ onReset }: { onReset: () => Promise<void> }) {
   );
 }
 
+// Timing averages: start the 30 day window fresh (old data kept), or erase all timing history.
+function AveragesCard({
+  resetAt,
+  onReset,
+  onErase
+}: {
+  resetAt: string | null | undefined;
+  onReset: () => Promise<void>;
+  onErase: () => Promise<void>;
+}) {
+  const [askReset, setAskReset] = useState(false);
+  const [askErase, setAskErase] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const since = resetAt
+    ? new Date(resetAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+    : null;
+  return (
+    <div className="card p-5 mb-6">
+      <h3 className="font-bold mb-1">Timing averages</h3>
+      <p className="text-sm text-slate-500 mb-3">
+        The averages below and the yellow and red timer colors use the last 30 days.
+        {since ? ` Right now they only count visits since ${since}.` : ""}
+      </p>
+
+      <div className="mb-4">
+        <div className="text-sm font-semibold mb-1">Reset the 30 day averages</div>
+        <p className="text-sm text-slate-500 mb-2">
+          Starts the averages fresh from now, so only new visits count. Nothing is deleted, the older timing data stays in
+          the database.
+        </p>
+        {askReset ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-sm font-semibold text-amber-600">Start the averages fresh now?</span>
+            <button
+              className="px-4 py-2.5 rounded-xl bg-blue-600 text-white font-semibold text-sm"
+              onClick={async () => {
+                await onReset();
+                setAskReset(false);
+                setMessage("Done. Averages now count visits from this moment.");
+              }}
+            >
+              Yes, reset averages
+            </button>
+            <button
+              className="px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-sm"
+              onClick={() => setAskReset(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            className="px-4 py-2.5 rounded-xl border border-blue-600 text-blue-700 dark:text-blue-300 font-semibold text-sm"
+            onClick={() => {
+              setMessage(null);
+              setAskReset(true);
+            }}
+          >
+            Reset 30 day averages
+          </button>
+        )}
+      </div>
+
+      <div className="pt-4 border-t border-slate-100 dark:border-slate-700">
+        <div className="text-sm font-semibold mb-1">Erase all timing history</div>
+        <p className="text-sm text-slate-500 mb-2">
+          Permanently deletes every saved step time. Visits, averages and provider idle time start over from zero. This
+          cannot be undone.
+        </p>
+        {askErase ? (
+          <div className="rounded-xl border-2 border-red-600 bg-red-50 dark:bg-red-950 p-4">
+            <div className="font-bold text-red-700 dark:text-red-300 mb-1">Warning: this cannot be undone</div>
+            <div className="text-sm text-red-700 dark:text-red-300 mb-3">
+              You must verify with your administrator before proceeding. All timing history will be erased for good.
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                className="px-4 py-2.5 rounded-xl bg-red-700 text-white font-semibold text-sm"
+                onClick={async () => {
+                  await onErase();
+                  setAskErase(false);
+                  setMessage("All timing history was erased.");
+                }}
+              >
+                Yes, erase everything
+              </button>
+              <button
+                className="px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-sm"
+                onClick={() => setAskErase(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            className="px-4 py-2.5 rounded-xl border border-red-700 text-red-700 dark:text-red-300 font-semibold text-sm"
+            onClick={() => {
+              setMessage(null);
+              setAskErase(true);
+            }}
+          >
+            Erase all timing history
+          </button>
+        )}
+      </div>
+      {message && <div className="mt-3 text-sm text-emerald-600 font-semibold">{message}</div>}
+    </div>
+  );
+}
+
 // One text box per room. Saves when you click away, so typing never fights the live updates.
 function DirectionsRow({
   name,
@@ -96,13 +206,14 @@ export default function AdminPage() {
     if (!items.length) return null;
     return items.reduce((a, h) => a + h.duration_ms, 0) / items.length;
   };
-  const roomVisits = (roomId: string) => history.filter((h) => h.room_id === roomId && h.stage === "needs_cleanup").length;
+  // Every visit passes through "Ready for nurse" exactly once, so that is the visit count.
+  const roomVisits = (roomId: string) => history.filter((h) => h.room_id === roomId && h.stage === "ready_for_nurse").length;
 
   const idleByProvider = useMemo(() => computeDoctorIdleTime(history), [history]);
 
   const overdueCount = rooms.filter(isOverdue).length;
   const lockoutCount = rooms.filter((r) => r.contaminated).length;
-  const totalVisits = history.filter((h) => h.stage === "needs_cleanup").length;
+  const totalVisits = history.filter((h) => h.stage === "ready_for_nurse").length;
   const maxAvg = Math.max(...STAGE_ORDER.map((s) => avgByStage[s] ?? 0), 1);
   const bottleneck = STAGE_ORDER.reduce<Stage | null>(
     (best, s) => (!best || (avgByStage[s] ?? 0) > (avgByStage[best] ?? 0) ? s : best),
@@ -134,6 +245,12 @@ export default function AdminPage() {
       <StaffRoster staff={staff} onAdd={actions.addStaff} onRename={actions.renameStaff} onRemove={actions.removeStaff} />
 
       <ResetDayCard onReset={actions.resetDay} />
+
+      <AveragesCard
+        resetAt={clinic.averages_reset_at}
+        onReset={actions.resetAverages}
+        onErase={actions.eraseTimingHistory}
+      />
 
       <div className="card p-5 mb-6">
         <h3 className="font-bold mb-1">Room directions</h3>
@@ -175,7 +292,9 @@ export default function AdminPage() {
       </div>
 
       <div className="card p-5 mb-6">
-        <h3 className="font-bold mb-4">Average minutes per step, trailing 30 days</h3>
+        <h3 className="font-bold mb-4">
+          Average minutes per step{clinic.averages_reset_at ? ", since the last reset" : ", trailing 30 days"}
+        </h3>
         {STAGE_ORDER.map((s) => {
           const pct = Math.max(4, ((avgByStage[s] ?? 0) / maxAvg) * 100);
           return (
@@ -235,7 +354,6 @@ export default function AdminPage() {
 
       <div className="card p-5">
         <h3 className="font-bold mb-1">Per room</h3>
-        <Legend />
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -249,7 +367,6 @@ export default function AdminPage() {
                 <th className="pb-2 pr-3">Avg w/ doctor</th>
                 <th className="pb-2 pr-3">Avg shots</th>
                 <th className="pb-2 pr-3">Avg other</th>
-                <th className="pb-2 pr-3">Avg turnaround</th>
                 <th className="pb-2">Visits</th>
               </tr>
             </thead>
@@ -298,9 +415,6 @@ export default function AdminPage() {
                     <td className="py-2 pr-3 font-mono">
                       {roomAvg(r.id, "other") ? formatMinutes(roomAvg(r.id, "other")!) : "—"}
                     </td>
-                    <td className="py-2 pr-3 font-mono">
-                      {roomAvg(r.id, "needs_cleanup") ? formatMinutes(roomAvg(r.id, "needs_cleanup")!) : "—"}
-                    </td>
                     <td className="py-2 font-mono">{roomVisits(r.id)}</td>
                   </tr>
                 );
@@ -312,8 +426,7 @@ export default function AdminPage() {
           Fallback overdue thresholds, used only until a step has enough history: ready for nurse over{" "}
           {THRESH_MIN.ready_for_nurse}m, prepping over {THRESH_MIN.prepping}m, wait for doctor over{" "}
           {THRESH_MIN.ready_for_doctor}m, with doctor over {THRESH_MIN.with_doctor}m, shots or other over{" "}
-          {THRESH_MIN.shots}m, turnaround over{" "}
-          {THRESH_MIN.needs_cleanup}m.
+          {THRESH_MIN.shots}m.
         </p>
       </div>
     </div>

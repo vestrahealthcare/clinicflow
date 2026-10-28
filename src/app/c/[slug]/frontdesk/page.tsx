@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useClinic } from "@/lib/clinicContext";
 import { LiveTimer } from "@/components/LiveTimer";
-import { Legend } from "@/components/Legend";
 import { ClaimPicker } from "@/components/ClaimPicker";
 import { BlackStage } from "@/components/BlackStage";
 import { STAGE_LABEL, FOLLOWUP_TIMEFRAME_LABEL, FOLLOWUP_REASON_LABEL } from "@/lib/constants";
@@ -16,6 +15,9 @@ export default function FrontDeskPage() {
   const [claimingCheckout, setClaimingCheckout] = useState<string | null>(null);
   const [confirmDepart, setConfirmDepart] = useState<string | null>(null);
   const [checkInError, setCheckInError] = useState<string | null>(null);
+  // Change room: the occupied room whose patient is being moved, and any error from the move.
+  const [movingFrom, setMovingFrom] = useState<string | null>(null);
+  const [moveError, setMoveError] = useState<string | null>(null);
   // "keep" = leave the room's provider as set in Today's staffing, "any" = any provider, otherwise a provider id.
   const [providerChoice, setProviderChoice] = useState<string>("keep");
   const cleanInitials = initials.replace(/[^A-Za-z]/g, "").toUpperCase().slice(0, 4);
@@ -39,6 +41,18 @@ export default function FrontDeskPage() {
     }
   }
 
+  async function moveTo(fromId: string, toId: string) {
+    setMoveError(null);
+    const err = await actions.swapRoom(fromId, toId);
+    if (err) {
+      setMoveError(err);
+      return;
+    }
+    const from = rooms.find((r) => r.id === fromId);
+    if (from) setLastAssigned({ roomId: toId, ticket: from.ticket ?? "", initials: from.initials ?? "" });
+    setMovingFrom(null);
+  }
+
   const lastRoom = lastAssigned ? rooms.find((r) => r.id === lastAssigned.roomId) : null;
   const lastHallway = lastRoom ? hallways.find((h) => h.id === lastRoom.hallway_id) : null;
 
@@ -55,8 +69,6 @@ export default function FrontDeskPage() {
           </button>
         </div>
       )}
-
-      <Legend />
 
       <div className="card p-4 mb-4 flex flex-wrap items-center gap-3">
         <label htmlFor="initials" className="font-semibold text-sm">
@@ -223,6 +235,7 @@ export default function FrontDeskPage() {
               <th className="pb-2">Initials</th>
               <th className="pb-2">Ticket</th>
               <th className="pb-2">Time in step</th>
+              <th className="pb-2"></th>
             </tr>
           </thead>
           <tbody>
@@ -244,16 +257,52 @@ export default function FrontDeskPage() {
                     />
                   )}
                 </td>
+                <td className="py-2 text-right">
+                  {!r.contaminated && r.stage !== "vacant" && (
+                    <button
+                      className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-semibold whitespace-nowrap"
+                      onClick={() => {
+                        setMoveError(null);
+                        setMovingFrom(movingFrom === r.id ? null : r.id);
+                      }}
+                    >
+                      Change room
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
+        {movingFrom && (
+          <div className="mt-3 rounded-xl border border-slate-200 p-3">
+            <div className="text-sm font-semibold mb-2">
+              Move {rooms.find((r) => r.id === movingFrom)?.initials ?? "the patient"} from{" "}
+              {rooms.find((r) => r.id === movingFrom)?.name} to which vacant room?
+            </div>
+            {vacant.length === 0 ? (
+              <div className="text-sm text-slate-500 mb-2">No vacant rooms right now.</div>
+            ) : (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {vacant.map((v) => (
+                  <button key={v.id} className="chip" onClick={() => moveTo(movingFrom, v.id)}>
+                    {v.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            {moveError && <div className="text-sm font-semibold text-red-600 mb-2">{moveError}</div>}
+            <button className="text-sm text-slate-500" onClick={() => setMovingFrom(null)}>
+              Cancel
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="card p-5">
         <h3 className="font-bold mb-1">Today&apos;s staffing</h3>
         <p className="text-sm text-slate-500 mb-3">
-          Who&apos;s covering which room. Drives the color on the board. Leave a room as &quot;Any nurse&quot; or
+          Who&apos;s covering which room. Leave a room as &quot;Any nurse&quot; or
           &quot;Any provider&quot; if you do not want to name someone specific.
         </p>
         <table className="w-full text-sm">

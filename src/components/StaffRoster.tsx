@@ -89,7 +89,7 @@ export function StaffRoster({ staff, onAdd, onRename, onRemove }: Props) {
       <p className="text-sm text-slate-500 mb-4">
         Up to {MAX_STAFF.doctor} providers, {MAX_STAFF.nurse} nurses and {MAX_STAFF.frontdesk} front desk staff.
         Providers and nurses can be assigned to rooms; everyone on these lists can pick their name for &ldquo;I&apos;ve
-        got it&rdquo;. The color always stays provider blue or nurse green regardless of who it is.
+        got it&rdquo;.
       </p>
       <div className="grid gap-6 sm:grid-cols-3">
         <RoleColumn role="doctor" label="Provider" people={providers} onAdd={onAdd} onRename={onRename} onRemove={onRemove} />

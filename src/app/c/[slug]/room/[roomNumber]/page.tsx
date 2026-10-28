@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useClinic } from "@/lib/clinicContext";
 import { LiveTimer } from "@/components/LiveTimer";
 import { ClaimPicker } from "@/components/ClaimPicker";
@@ -32,6 +33,12 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
   const [fuTimeframe, setFuTimeframe] = useState<FollowupTimeframe | null>(null);
   const [fuReason, setFuReason] = useState<FollowupReason | null>(null);
   const [fuNote, setFuNote] = useState("");
+  // Start prep with no name set at the top of the page: ask which nurse is going in.
+  const [prepPicker, setPrepPicker] = useState(false);
+  // Change room: pick a vacant room to move this patient to.
+  const [changingRoom, setChangingRoom] = useState(false);
+  const [swapError, setSwapError] = useState<string | null>(null);
+  const router = useRouter();
 
   const roomNumber = parseInt(params.roomNumber, 10);
   const room = rooms.find((r) => r.room_number === roomNumber);
@@ -66,6 +73,22 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
   const onCheckOut = () => {
     if (pendingTests.length > 0) setAskCallbackFor(room.id);
     else checkOutNow(false);
+  };
+
+  const vacantRooms = rooms.filter((r) => r.stage === "vacant" && !r.contaminated && r.id !== room.id);
+  const moveTo = async (toId: string, toNumber: number) => {
+    setSwapError(null);
+    const err = await actions.swapRoom(room.id, toId);
+    if (err) {
+      setSwapError(err);
+      return;
+    }
+    setChangingRoom(false);
+    router.push(`/c/${params.slug}/room/${toNumber}`);
+  };
+  const startPrep = (name: string) => {
+    setPrepPicker(false);
+    actions.advanceStage(room.id, { expected: "ready_for_nurse", actor: name });
   };
 
   const openFollowup = () => {
@@ -207,6 +230,19 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
           <button className="w-full py-4 rounded-xl bg-blue-600 text-white font-bold text-lg" onClick={onCheckOut}>
             {ACTION_LABEL[room.stage]} →
           </button>
+        ) : room.stage === "ready_for_nurse" ? (
+          <>
+            <button
+              className="w-full py-4 rounded-xl bg-blue-600 text-white font-bold text-lg"
+              onClick={() => (me ? startPrep(me) : setPrepPicker(true))}
+            >
+              {ACTION_LABEL[room.stage]}
+              {me ? ` (${me})` : ""} →
+            </button>
+            {prepPicker && (
+              <ClaimPicker prompt="Which nurse is going in?" onPick={startPrep} onCancel={() => setPrepPicker(false)} />
+            )}
+          </>
         ) : (
           <button
             className="w-full py-4 rounded-xl bg-blue-600 text-white font-bold text-lg"
@@ -214,6 +250,46 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
           >
             {ACTION_LABEL[room.stage]} →
           </button>
+        )}
+
+        {!room.contaminated && room.stage !== "vacant" && (
+          <div className="mt-3">
+            {changingRoom ? (
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+                <div className="text-xs text-slate-500 mb-2">
+                  Move {room.initials ?? "this patient"} to which vacant room?
+                </div>
+                {vacantRooms.length === 0 ? (
+                  <div className="text-sm text-slate-500 mb-2">No vacant rooms right now.</div>
+                ) : (
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {vacantRooms.map((r) => (
+                      <button key={r.id} className="chip" onClick={() => moveTo(r.id, r.room_number)}>
+                        {r.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {swapError && <div className="text-sm font-semibold text-red-600 mb-2">{swapError}</div>}
+                <button
+                  className="text-sm text-slate-500"
+                  onClick={() => {
+                    setChangingRoom(false);
+                    setSwapError(null);
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                className="w-full py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-sm font-semibold"
+                onClick={() => setChangingRoom(true)}
+              >
+                Change room
+              </button>
+            )}
+          </div>
         )}
 
         {!room.contaminated && items.length > 0 && (

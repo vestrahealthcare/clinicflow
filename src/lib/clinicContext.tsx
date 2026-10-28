@@ -22,17 +22,19 @@ import { clinicToday, dateKeyInTz } from "./util";
 import { STAGE_ORDER, AVG_WINDOW_DAYS, MAX_STAFF, ROLE_COLOR } from "./constants";
 
 export interface AdvanceOptions {
-  /** From "with_doctor" only: "shots", "other" or "needs_cleanup" (default). */
+  /** From "with_doctor" only: "shots" or "other". Without it the visit ends and the room is vacant. */
   target?: Stage;
   /** The stage the tablet was showing when tapped; the tap is ignored if the room has already moved on. */
   expected?: Stage;
   /** On departure, add the patient to the "Call with results" list if tests are still pending. */
   addCallback?: boolean;
+  /** Name of the person tapping the button (shown as the prep nurse when Start prep is tapped). */
+  actor?: string;
 }
 
 interface ClinicActions {
   advanceStage: (roomId: string, opts?: AdvanceOptions) => Promise<void>;
-  /** Check-out: room goes to cleanup, patient goes to the waiting room list. */
+  /** Check-out: room goes straight to vacant, patient goes to the waiting room list. */
   checkOut: (roomId: string, opts?: { expected?: Stage; addCallback?: boolean }) => Promise<void>;
   setFollowup: (
     roomId: string,
@@ -42,6 +44,12 @@ interface ClinicActions {
   ) => Promise<void>;
   /** Free text results typed on a Call with results task. */
   setCallbackNote: (callbackId: string, note: string) => Promise<void>;
+  /** Change room: moves the patient to a vacant room. Returns an error message, or null when it worked. */
+  swapRoom: (fromRoomId: string, toRoomId: string) => Promise<string | null>;
+  /** Start the 30 day averages fresh from now (old timing data is kept). */
+  resetAverages: () => Promise<void>;
+  /** Permanently erase all timing history. Cannot be undone. */
+  eraseTimingHistory: () => Promise<void>;
   /** Start of day: every room (not in lockout) back to vacant, checkout list cleared, ticket numbers restart. */
   resetDay: () => Promise<void>;
   /** "I've got it": pass the person's name, or an empty name to undo. */
@@ -145,8 +153,11 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadHistory = useCallback(async (clinicId: string) => {
-    const since = new Date(Date.now() - AVG_WINDOW_DAYS * 24 * 3600 * 1000).toISOString();
+  const loadHistory = useCallback(async (clinicId: string, resetAt?: string | null) => {
+    // The last 30 days, or since the Admin "reset averages" button was pressed if that is later.
+    let sinceMs = Date.now() - AVG_WINDOW_DAYS * 24 * 3600 * 1000;
+    if (resetAt) sinceMs = Math.max(sinceMs, new Date(resetAt).getTime());
+    const since = new Date(sinceMs).toISOString();
     const { data } = await supabase
       .from("room_history")
       .select("*")
@@ -228,7 +239,7 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
       setStaff((staffRows as Staff[]) ?? []);
       setRooms((roomRows as Room[]) ?? []);
       await Promise.all([
-        loadHistory(clinicRow.id),
+        loadHistory(clinicRow.id, (clinicRow as Clinic).averages_reset_at),
         loadFollowups(clinicRow.id, (clinicRow as Clinic).timezone)
       ]);
       if (!cancelled) setLoading(false);
@@ -336,9 +347,16 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
   // often is enough reason to refresh rather than needing this instantly.
   useEffect(() => {
     if (!clinic) return;
-    const id = setInterval(() => loadHistory(clinic.id), 60_000);
+    const id = setInterval(() => loadHistory(clinic.id, clinic.averages_reset_at), 60_000);
     return () => clearInterval(id);
   }, [clinic, loadHistory]);
+
+  // When the averages are reset or erased (here or on another device), reload right away.
+  const resetAt = clinic?.averages_reset_at ?? null;
+  const clinicIdForHistory = clinic?.id;
+  useEffect(() => {
+    if (clinicIdForHistory) loadHistory(clinicIdForHistory, resetAt);
+  }, [clinicIdForHistory, resetAt, loadHistory]);
 
   const staffById = useMemo(() => Object.fromEntries(staff.map((s) => [s.id, s])), [staff]);
 
@@ -367,7 +385,8 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
       p_room_id: roomId,
       p_target: opts?.target ?? null,
       p_expected_stage: opts?.expected ?? null,
-      p_add_callback: opts?.addCallback ?? false
+      p_add_callback: opts?.addCallback ?? false,
+      p_actor: opts?.actor ?? null
     });
   }, []);
 
@@ -406,6 +425,36 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
     },
     [refreshFollowups]
   );
+
+  const swapRoom = useCallback(async (fromRoomId: string, toRoomId: string) => {
+    const { data, error: rpcErr } = await supabase.rpc("swap_room", { p_from: fromRoomId, p_to: toRoomId });
+    if (rpcErr) {
+      const missing = rpcErr.code === "PGRST202" || rpcErr.code === "42883" || /swap_room|schema cache/i.test(rpcErr.message);
+      return missing
+        ? "Change room could not run because the database update is missing. Run clinicflow-update-3-2026-10-28.sql in the Supabase SQL Editor, then try again."
+        : `Change room failed: ${rpcErr.message}`;
+    }
+    return data === true ? null : "That room is no longer available. Pick another vacant room.";
+  }, []);
+
+  const resetAverages = useCallback(async () => {
+    if (!clinic) return;
+    const { error: rpcErr } = await supabase.rpc("reset_timing_averages", { p_clinic_id: clinic.id });
+    if (!rpcErr) {
+      const now = new Date().toISOString();
+      setClinic((c) => (c ? { ...c, averages_reset_at: now } : c));
+    }
+  }, [clinic]);
+
+  const eraseTimingHistory = useCallback(async () => {
+    if (!clinic) return;
+    const { error: rpcErr } = await supabase.rpc("erase_timing_history", { p_clinic_id: clinic.id });
+    if (!rpcErr) {
+      const now = new Date().toISOString();
+      setHistory([]);
+      setClinic((c) => (c ? { ...c, averages_reset_at: now } : c));
+    }
+  }, [clinic]);
 
   const resetDay = useCallback(async () => {
     if (!clinic) return;
@@ -618,6 +667,9 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
       checkOut,
       setFollowup,
       setCallbackNote,
+      swapRoom,
+      resetAverages,
+      eraseTimingHistory,
       resetDay,
       claim,
       claimCheckoutFollowup,

@@ -456,6 +456,8 @@ alter table rooms add column if not exists initials text;
 alter table rooms add column if not exists directions text;
 alter table rooms add column if not exists claims jsonb not null default '{}'::jsonb;
 alter table rooms add column if not exists followup jsonb;
+alter table rooms add column if not exists prep_by text;
+alter table clinics add column if not exists averages_reset_at timestamptz;
 alter table calls add column if not exists initials text;
 alter table lab_samples add column if not exists initials text;
 alter table result_callbacks add column if not exists initials text;
@@ -537,12 +539,13 @@ begin
         'assign_patient', 'advance_room_stage', 'check_out_room', 'toggle_request',
         'set_room_note', 'set_lockout', 'set_followup', 'claim_request',
         'claim_checkout_followup', 'set_checkout_departed', 'set_room_directions',
-        'set_callback_note', 'reset_day'
+        'set_callback_note', 'reset_day', 'swap_room', 'reset_timing_averages', 'erase_timing_history'
       )
   loop
     execute 'drop function ' || r.sig;
   end loop;
 end $$;
+-- Check in: same as before, and clears the prep nurse.
 create or replace function assign_patient(
   p_room_id uuid,
   p_initials text default null,
@@ -568,7 +571,7 @@ begin
 
   update rooms set
     stage = 'ready_for_nurse', stage_started_at = now(), ticket = v_ticket,
-    initials = v_initials, claims = '{}'::jsonb, followup = null,
+    initials = v_initials, claims = '{}'::jsonb, followup = null, prep_by = null,
     assigned_doctor_id = case when p_set_doctor then p_doctor_id else assigned_doctor_id end,
     updated_at = now()
   where id = p_room_id and stage = 'vacant' and contaminated = false;
@@ -583,19 +586,21 @@ begin
 end;
 $$;
 
--- Same signature as before. Adds: initials on call-with-results rows, a fresh
--- "I've got it" state when a room enters Shots, and a full reset when the room
--- goes back to vacant.
+-- Moves a room to its next step. The visit steps (Doctor in room, Shots, Other) now go
+-- straight to Vacant: there is no cleaning step any more.
+--   p_actor   the name of the person who tapped Start prep (shown on the board)
 create or replace function advance_room_stage(
   p_room_id uuid,
   p_target text default null,
   p_expected_stage text default null,
-  p_add_callback boolean default false
+  p_add_callback boolean default false,
+  p_actor text default null
 )
 returns void language plpgsql as $$
 declare
   v_room rooms%rowtype;
   v_next text;
+  v_target text;
   v_elapsed_ms bigint;
   v_provider_name text;
   v_tests text[];
@@ -609,20 +614,23 @@ begin
     return;
   end if;
 
+  -- An older copy of the app may still ask for "needs_cleanup". That now means vacant.
+  v_target := case when p_target = 'needs_cleanup' then 'vacant' else p_target end;
+
   v_next := case v_room.stage
     when 'ready_for_nurse' then 'prepping'
     when 'prepping' then 'ready_for_doctor'
     when 'ready_for_doctor' then 'with_doctor'
-    when 'with_doctor' then coalesce(p_target, 'needs_cleanup')
-    when 'shots' then 'needs_cleanup'
-    when 'other' then 'needs_cleanup'
+    when 'with_doctor' then coalesce(v_target, 'vacant')
+    when 'shots' then 'vacant'
+    when 'other' then 'vacant'
     when 'needs_cleanup' then 'vacant'
   end;
 
-  if p_target is not null and p_target <> v_next then
+  if v_target is not null and v_target <> v_next then
     return;
   end if;
-  if v_room.stage = 'with_doctor' and v_next not in ('shots', 'other', 'needs_cleanup') then
+  if v_room.stage = 'with_doctor' and v_next not in ('shots', 'other', 'vacant') then
     return;
   end if;
 
@@ -636,7 +644,7 @@ begin
   insert into room_history (clinic_id, room_id, stage, duration_ms, provider_name)
   values (v_room.clinic_id, v_room.id, v_room.stage, v_elapsed_ms, v_provider_name);
 
-  if p_add_callback and v_next = 'needs_cleanup' then
+  if p_add_callback and v_next = 'vacant' and v_room.stage in ('with_doctor', 'shots', 'other') then
     select coalesce(array_agg(k order by k), '{}') into v_tests
     from unnest(array['covid','flu','rsv','strep']) as k
     where coalesce((v_room.requests->>k)::boolean, false);
@@ -662,12 +670,15 @@ begin
                   when v_next = 'shots' then claims - 'shots'
                   else claims end,
     followup = case when v_next = 'vacant' then null else followup end,
+    prep_by = case when v_next = 'vacant' then null
+                   when v_next = 'prepping' then nullif(left(trim(coalesce(p_actor, '')), 40), '')
+                   else prep_by end,
     updated_at = now()
   where id = p_room_id;
 end;
 $$;
 
--- "Check-out": the room goes to cleanup, the patient goes to the waiting room
+-- "Check-out": the room goes straight to Vacant, the patient goes to the waiting room
 -- list (with any follow up request), and nothing patient specific stays on the room.
 create or replace function check_out_room(
   p_room_id uuid,
@@ -687,10 +698,10 @@ begin
     return;
   end if;
 
-  perform advance_room_stage(p_room_id, 'needs_cleanup', v_room.stage, p_add_callback);
+  perform advance_room_stage(p_room_id, 'vacant', v_room.stage, p_add_callback);
 
   select stage into v_after from rooms where id = p_room_id;
-  if v_after <> 'needs_cleanup' then
+  if v_after <> 'vacant' then
     return;
   end if;
 
@@ -700,11 +711,6 @@ begin
     v_room.followup->>'timeframe', v_room.followup->>'reason', v_room.followup->>'note',
     nullif(v_room.claims->>'followup', '')
   );
-
-  update rooms set
-    initials = null, followup = null, claims = '{}'::jsonb,
-    requests = '{}'::jsonb, note = null, updated_at = now()
-  where id = p_room_id;
 end;
 $$;
 
@@ -766,7 +772,7 @@ begin
     update rooms set
       contaminated = false, stage = 'vacant', stage_started_at = now(),
       ticket = null, initials = null, note = null, requests = '{}'::jsonb,
-      claims = '{}'::jsonb, followup = null, updated_at = now()
+      claims = '{}'::jsonb, followup = null, prep_by = null, updated_at = now()
     where id = p_room_id;
   end if;
 end;
@@ -853,13 +859,90 @@ returns void language plpgsql as $$
 begin
   update rooms set
     stage = 'vacant', stage_started_at = now(), ticket = null, initials = null, note = null,
-    requests = '{}'::jsonb, claims = '{}'::jsonb, followup = null, updated_at = now()
+    requests = '{}'::jsonb, claims = '{}'::jsonb, followup = null, prep_by = null, updated_at = now()
   where clinic_id = p_clinic_id and contaminated = false;
 
   update checkouts set departed_at = now(), initials = null
   where clinic_id = p_clinic_id and departed_at is null;
 
   update clinics set next_ticket_num = 1 where id = p_clinic_id;
+end;
+$$;
+
+-- Change room: moves a checked in patient (initials, ticket, step and timer, requests,
+-- message, "I've got it" names, follow up, and the visit's provider) from one room to a
+-- vacant room. The old room goes back to Vacant and keeps its own usual provider.
+-- Returns true when the move happened, false when it was not allowed (the new room is
+-- not vacant, is in lockout, or the old room has no patient).
+create or replace function swap_room(p_from uuid, p_to uuid)
+returns boolean language plpgsql as $$
+declare
+  a rooms%rowtype;
+  b rooms%rowtype;
+begin
+  if p_from is null or p_to is null or p_from = p_to then
+    return false;
+  end if;
+
+  perform 1 from rooms where id in (p_from, p_to) order by id for update;
+
+  select * into a from rooms where id = p_from;
+  if not found then
+    return false;
+  end if;
+  select * into b from rooms where id = p_to;
+  if not found then
+    return false;
+  end if;
+
+  if a.clinic_id <> b.clinic_id
+     or a.contaminated or a.stage = 'vacant'
+     or b.contaminated or b.stage <> 'vacant' then
+    return false;
+  end if;
+
+  update rooms set
+    stage = a.stage, stage_started_at = a.stage_started_at, ticket = a.ticket,
+    initials = a.initials, note = a.note, requests = a.requests, claims = a.claims,
+    followup = a.followup, prep_by = a.prep_by, assigned_doctor_id = a.assigned_doctor_id,
+    updated_at = now()
+  where id = p_to;
+
+  update rooms set
+    stage = 'vacant', stage_started_at = now(), ticket = null, initials = null, note = null,
+    requests = '{}'::jsonb, claims = '{}'::jsonb, followup = null, prep_by = null,
+    assigned_doctor_id = b.assigned_doctor_id, updated_at = now()
+  where id = p_from;
+
+  -- Keep this patient's lab samples and the waiting room "go to" message pointing at the new room.
+  update lab_samples set room_id = p_to, room_name = b.name
+  where room_id = p_from and coalesce(ticket, '') = coalesce(a.ticket, '')
+    and requested_at > now() - interval '1 day';
+
+  update calls set room_id = p_to, called_at = now()
+  where room_id = p_from and coalesce(ticket, '') = coalesce(a.ticket, '')
+    and called_at > now() - interval '1 day';
+
+  return true;
+end;
+$$;
+
+-- Start the 30 day averages fresh from now. Old timing data is kept in the database.
+create or replace function reset_timing_averages(p_clinic_id uuid)
+returns void language plpgsql as $$
+begin
+  update clinics set averages_reset_at = now() where id = p_clinic_id;
+end;
+$$;
+
+-- Permanently erases ALL timing history for the clinic. This cannot be undone.
+-- (security definer: the timing history table has no delete rule for the public key,
+-- so this function is the only way to erase it.)
+create or replace function erase_timing_history(p_clinic_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  delete from room_history where clinic_id = p_clinic_id;
+  update clinics set averages_reset_at = now() where id = p_clinic_id;
 end;
 $$;
 
@@ -916,7 +999,7 @@ begin
     insert into rooms (clinic_id, room_number, name, hallway_id, side, assigned_nurse_id, assigned_doctor_id)
     values (
       v_clinic_id, i,
-      (array['Ocean','Dinosaurs','Space','Harry Potter','Monsters Inc','Princess','Farm','Cars','Room 9','Room 10','Room 11','Room 12'])[i],
+      (array['Ocean','Dinosaurs','Space','Harry Potter','Monsters Inc','Princess','Farm','Cars','Room 9','Room 10','Room 11','Overflow'])[i],
       v_hallway_id,
       case when i % 2 = 1 then 'left' else 'right' end,
       case when i % 2 = 1 then v_nurseA else v_nurseB end,

@@ -19,7 +19,8 @@ export function LiveTimer({
   countByStage,
   yellowAfterMin,
   redAfterMin,
-  minVisibleMin
+  minVisibleMin,
+  pill
 }: {
   startedAt: string;
   paused?: boolean;
@@ -32,6 +33,8 @@ export function LiveTimer({
   redAfterMin?: number;
   /** Hide the timer until this many minutes have passed. Room step timers default to 5, others to 0. */
   minVisibleMin?: number;
+  /** Yellow and red times sit on a white pill so they stay readable on a colored background. */
+  pill?: boolean;
 }) {
   const [, setTick] = useState(0);
 
@@ -57,5 +60,6 @@ export function LiveTimer({
     color = "yellow";
   }
 
-  return <span className={`font-mono ${COLOR_CLASS[color]}`}>{formatDuration(ms)}</span>;
+  const pillClass = pill && color !== "normal" ? "bg-white px-2 rounded-lg" : "";
+  return <span className={`font-mono ${COLOR_CLASS[color]} ${pillClass}`}>{formatDuration(ms)}</span>;
 }

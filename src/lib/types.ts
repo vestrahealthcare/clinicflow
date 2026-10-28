@@ -35,6 +35,8 @@ export interface Clinic {
   room_count: number;
   next_ticket_num: number;
   timezone?: string;
+  /** The 30 day timing averages only count visits after this moment (Admin reset). */
+  averages_reset_at?: string | null;
 }
 
 export interface RequestFlags {
@@ -80,6 +82,8 @@ export interface Room {
   claims: Record<string, string>;
   /** Follow up requested from the room, moves to the check-out list at check-out. */
   followup: { timeframe: FollowupTimeframe; reason: FollowupReason; note?: string } | null;
+  /** The nurse who tapped Start prep, shown while the room is in Prepping. */
+  prep_by?: string | null;
   updated_at: string;
 }
 
