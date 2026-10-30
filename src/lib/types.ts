@@ -6,7 +6,9 @@ export type Stage =
   | "with_doctor"
   | "shots"
   | "other"
-  | "needs_cleanup";
+  | "needs_cleanup"
+  /** The 2 minutes after check out. The board shows "Turning over", then the room shows as vacant. */
+  | "turnover";
 
 export type StaffRole = "nurse" | "doctor" | "frontdesk";
 
@@ -17,6 +19,8 @@ export interface Staff {
   role: StaffRole;
   color: string;
   sort_order: number;
+  /** Provider name color on the board and room pages (hex), set in Admin. */
+  name_color?: string | null;
 }
 
 export interface Hallway {
@@ -37,7 +41,12 @@ export interface Clinic {
   timezone?: string;
   /** The 30 day timing averages only count visits after this moment (Admin reset). */
   averages_reset_at?: string | null;
+  /** Yellow and red minutes per step, editable in Admin. */
+  timer_targets?: TimerTargets | null;
 }
+
+export type TimerStage = "ready_for_nurse" | "prepping" | "ready_for_doctor" | "with_doctor" | "shots" | "other";
+export type TimerTargets = Record<TimerStage, { yellow: number; red: number }>;
 
 export interface RequestFlags {
   rsv?: boolean;
@@ -84,6 +93,12 @@ export interface Room {
   followup: { timeframe: FollowupTimeframe; reason: FollowupReason; note?: string } | null;
   /** The nurse who tapped Start prep, shown while the room is in Prepping. */
   prep_by?: string | null;
+  /** The provider for this patient's visit (can differ from the room's usual provider). */
+  visit_doctor_id?: string | null;
+  visit_started_at?: string | null;
+  visit_id?: string | null;
+  /** Saved copy of the last visit for "Undo check out" during turnover. */
+  undo?: Record<string, unknown> | null;
   updated_at: string;
 }
 
@@ -164,4 +179,40 @@ export interface ResultCallback {
   departed_at: string;
   ready_at: string | null;
   called_at: string | null;
+}
+
+/** One row of Tracker data: a day, a provider, counts and time totals (see tracker_data in the SQL). */
+export interface TrackerRow {
+  visit_date: string;
+  provider_name: string | null;
+  after_reset: boolean;
+  visits: number;
+  /** Visits recorded live (not filled in from older history); only these have swabs and step times. */
+  new_visits: number;
+  d2d_sum: number | null;
+  d2d_n: number;
+  rfn_sum: number | null;
+  rfn_n: number;
+  prep_sum: number | null;
+  prep_n: number;
+  rfd_sum: number | null;
+  rfd_n: number;
+  wd_sum: number | null;
+  wd_n: number;
+  sh_sum: number | null;
+  sh_n: number;
+  ot_sum: number | null;
+  ot_n: number;
+  sw_rsv: number;
+  sw_flu: number;
+  sw_strep: number;
+  sw_covid: number;
+  sw_throat_culture: number;
+  sw_strep_culture: number;
+  sw_viral_panel: number;
+}
+
+export interface TrackerData {
+  reset_at: string | null;
+  rows: TrackerRow[];
 }

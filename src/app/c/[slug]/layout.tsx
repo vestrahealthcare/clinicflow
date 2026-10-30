@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ClinicProvider, useClinic } from "@/lib/clinicContext";
 import { WhoAmI } from "@/components/WhoAmI";
+import { SyncStatus } from "@/components/SyncStatus";
 
 function TopNav({ slug }: { slug: string }) {
   const { clinic, followups } = useClinic();
@@ -42,7 +43,10 @@ function TopNav({ slug }: { slug: string }) {
           </Link>
         ))}
       </nav>
-      <WhoAmI />
+      <div className="flex items-center gap-3">
+        <SyncStatus />
+        <WhoAmI />
+      </div>
     </header>
   );
 }

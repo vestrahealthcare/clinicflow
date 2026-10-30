@@ -5,11 +5,12 @@ import { useClinic } from "@/lib/clinicContext";
 import { LiveTimer } from "@/components/LiveTimer";
 import { ClaimPicker } from "@/components/ClaimPicker";
 import { BlackStage } from "@/components/BlackStage";
+import { TurnoverCountdown } from "@/components/TurnoverCountdown";
 import { STAGE_LABEL, FOLLOWUP_TIMEFRAME_LABEL, FOLLOWUP_REASON_LABEL } from "@/lib/constants";
-import { roomDirections } from "@/lib/util";
+import { providerTag, roomDirections } from "@/lib/util";
 
 export default function FrontDeskPage() {
-  const { rooms, hallways, staff, checkouts, actions, avgByStage, countByStage, me } = useClinic();
+  const { rooms, hallways, staff, staffById, checkouts, actions, me } = useClinic();
   const [lastAssigned, setLastAssigned] = useState<{ roomId: string; ticket: string; initials: string } | null>(null);
   const [initials, setInitials] = useState("");
   const [claimingCheckout, setClaimingCheckout] = useState<string | null>(null);
@@ -22,8 +23,10 @@ export default function FrontDeskPage() {
   const [providerChoice, setProviderChoice] = useState<string>("keep");
   const cleanInitials = initials.replace(/[^A-Za-z]/g, "").toUpperCase().slice(0, 4);
 
-  const vacant = rooms.filter((r) => r.stage === "vacant" && !r.contaminated);
-  const busy = rooms.filter((r) => !(r.stage === "vacant" && !r.contaminated));
+  // A room still "Turning over" (the 2 minutes after check out) can take the next patient right away.
+  const isOpen = (r: (typeof rooms)[number]) => (r.stage === "vacant" || r.stage === "turnover") && !r.contaminated;
+  const vacant = rooms.filter(isOpen);
+  const busy = rooms.filter((r) => !isOpen(r));
   const nurses = staff.filter((s) => s.role === "nurse");
   const doctors = staff.filter((s) => s.role === "doctor");
 
@@ -122,7 +125,14 @@ export default function FrontDeskPage() {
                 {r.name}
               </div>
               <div className="text-xs text-slate-500 mb-3">
-                {roomDirections(r, hallway)} &middot; Vacant
+                {roomDirections(r, hallway)} &middot;{" "}
+                {r.stage === "turnover" ? (
+                  <span className="font-semibold text-slate-700">
+                    Turning over <TurnoverCountdown startedAt={r.stage_started_at} />
+                  </span>
+                ) : (
+                  "Vacant"
+                )}
               </div>
               <button
                 className="w-full bg-emerald-600 text-white font-bold py-2.5 rounded-lg disabled:opacity-40"
@@ -232,6 +242,7 @@ export default function FrontDeskPage() {
             <tr className="text-left text-slate-500 text-xs">
               <th className="pb-2">Room</th>
               <th className="pb-2">Status</th>
+              <th className="pb-2">Provider</th>
               <th className="pb-2">Initials</th>
               <th className="pb-2">Ticket</th>
               <th className="pb-2">Time in step</th>
@@ -243,22 +254,43 @@ export default function FrontDeskPage() {
               <tr key={r.id} className="border-t border-slate-100 dark:border-slate-700">
                 <td className="py-2">{r.name}</td>
                 <td className="py-2">{r.contaminated ? "Contamination lockout" : STAGE_LABEL[r.stage]}</td>
+                <td className="py-2">
+                  {(() => {
+                    const tag = providerTag(r, staffById);
+                    if (!tag) return "—";
+                    return (
+                      <select
+                        aria-label={`Provider for ${r.name}`}
+                        className="border border-slate-200 bg-slate-50 rounded-md text-sm px-2 py-1 font-bold"
+                        style={{ color: tag.color }}
+                        value={r.visit_doctor_id ?? ""}
+                        onChange={async (e) => {
+                          setMoveError(null);
+                          const err = await actions.setVisitProvider(r.id, e.target.value || null);
+                          if (err) setMoveError(err);
+                        }}
+                      >
+                        <option value="">Any provider</option>
+                        {doctors.map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.name}
+                          </option>
+                        ))}
+                      </select>
+                    );
+                  })()}
+                </td>
                 <td className="py-2 font-mono">{r.initials ?? "—"}</td>
                 <td className="py-2">{r.ticket ?? "—"}</td>
                 <td className="py-2">
                   {r.contaminated ? (
                     "—"
                   ) : (
-                    <LiveTimer
-                      startedAt={r.stage_started_at}
-                      stage={r.stage}
-                      avgByStage={avgByStage}
-                      countByStage={countByStage}
-                    />
+                    <LiveTimer startedAt={r.stage_started_at} stage={r.stage} />
                   )}
                 </td>
                 <td className="py-2 text-right">
-                  {!r.contaminated && r.stage !== "vacant" && (
+                  {!r.contaminated && (
                     <button
                       className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-semibold whitespace-nowrap"
                       onClick={() => {
@@ -274,6 +306,7 @@ export default function FrontDeskPage() {
             ))}
           </tbody>
         </table>
+        {moveError && !movingFrom && <div className="mt-2 text-sm font-semibold text-red-600">{moveError}</div>}
         {movingFrom && (
           <div className="mt-3 rounded-xl border border-slate-200 p-3">
             <div className="text-sm font-semibold mb-2">
@@ -302,8 +335,10 @@ export default function FrontDeskPage() {
       <div className="card p-5">
         <h3 className="font-bold mb-1">Today&apos;s staffing</h3>
         <p className="text-sm text-slate-500 mb-3">
-          Who&apos;s covering which room. Leave a room as &quot;Any nurse&quot; or
-          &quot;Any provider&quot; if you do not want to name someone specific.
+          Who&apos;s covering which room. The doctor here is the room&apos;s usual provider, used when you check in a
+          patient with &quot;Room&apos;s usual provider&quot;. To change the provider for one patient, use the
+          Provider list in the table above. Leave a room as &quot;Any nurse&quot; or &quot;Any provider&quot; if you
+          do not want to name someone specific.
         </p>
         <table className="w-full text-sm">
           <thead>

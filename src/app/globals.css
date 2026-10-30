@@ -55,6 +55,11 @@ body {
   0%, 100% { box-shadow: 0 0 0 3px #f97316, 0 0 18px 4px rgba(249, 115, 22, 0.75); background-color: #ffedd5; }
   50% { box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.15); background-color: #ffffff; }
 }
+@keyframes flash-yellow-kf {
+  0%, 100% { box-shadow: 0 0 0 3px #eab308, 0 0 18px 4px rgba(250, 204, 21, 0.8); background-color: #fef9c3; }
+  50% { box-shadow: 0 0 0 3px rgba(234, 179, 8, 0.15); background-color: #ffffff; }
+}
+.flash-yellow { animation: flash-yellow-kf 1.1s ease-in-out infinite; }
 .flash-blue { animation: flash-blue-kf 1.1s ease-in-out infinite; }
 .flash-pink { animation: flash-pink-kf 1.1s ease-in-out infinite; }
 .flash-orange { animation: flash-orange-kf 1.1s ease-in-out infinite; }

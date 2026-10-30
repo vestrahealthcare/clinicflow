@@ -1,4 +1,4 @@
-import { Stage } from "./types";
+import { Stage, TimerTargets } from "./types";
 
 export const STAGE_LABEL: Record<Stage, string> = {
   vacant: "Vacant",
@@ -8,7 +8,8 @@ export const STAGE_LABEL: Record<Stage, string> = {
   with_doctor: "Doctor in room",
   shots: "Shots",
   other: "Other (nurse task)",
-  needs_cleanup: "Needs cleanup"
+  needs_cleanup: "Needs cleanup",
+  turnover: "Turning over"
 };
 
 // Stage the room-tablet's big button advances to, and its label. Vacant has
@@ -17,9 +18,21 @@ export const NEXT_STAGE: Partial<Record<Stage, Stage>> = {
   ready_for_nurse: "prepping",
   prepping: "ready_for_doctor",
   ready_for_doctor: "with_doctor",
-  with_doctor: "vacant",
-  shots: "vacant",
-  other: "vacant"
+  with_doctor: "turnover",
+  shots: "turnover",
+  other: "turnover"
+};
+
+/** Check out leaves the room "Turning over" for this long, then it shows as vacant. */
+export const TURNOVER_MS = 120_000;
+
+/** Go back one step (room page). Not available at Ready for nurse. */
+export const PREVIOUS_STAGE: Partial<Record<Stage, Stage>> = {
+  prepping: "ready_for_nurse",
+  ready_for_doctor: "prepping",
+  with_doctor: "ready_for_doctor",
+  shots: "with_doctor",
+  other: "with_doctor"
 };
 
 export const ACTION_LABEL: Partial<Record<Stage, string>> = {
@@ -32,14 +45,15 @@ export const ACTION_LABEL: Partial<Record<Stage, string>> = {
   needs_cleanup: "Mark room clean" // only for a room still left in the old cleaning step
 };
 
-// Minutes in a stage before the room flashes overdue on the board.
-export const THRESH_MIN: Partial<Record<Stage, number>> = {
-  ready_for_nurse: 5,
-  prepping: 8,
-  ready_for_doctor: 10,
-  with_doctor: 20,
-  shots: 10,
-  other: 10
+// Timer colors: minutes in a step before the timer turns yellow, then red. Fixed numbers
+// the clinic sets in Admin (Timer colors card); these are the starting values.
+export const DEFAULT_TIMER_TARGETS: TimerTargets = {
+  ready_for_nurse: { yellow: 5, red: 8 },
+  prepping: { yellow: 8, red: 12 },
+  ready_for_doctor: { yellow: 10, red: 15 },
+  with_doctor: { yellow: 20, red: 30 },
+  shots: { yellow: 10, red: 15 },
+  other: { yellow: 10, red: 15 }
 };
 
 export const STAGE_ORDER: Stage[] = [
@@ -75,30 +89,42 @@ export const MAX_STAFF: Record<"doctor" | "nurse" | "frontdesk", number> = {
 //   vacant white, occupied light gray, ready for doctor blue, contamination lockout red.
 export const BOX_COLOR = {
   vacant: "#FFFFFF",
-  occupied: "#E2E8F0",
+  occupied: "#CBD5E1",
   readyForDoctor: "#60A5FA",
   lockout: "#EF4444"
 } as const;
 
 // Fishbowl flash colors: the whole square blinks between its own color and the flash color
-// (or white, when the flash color is the same as the square). Tests and support requests
-// blue, Shots pink, messages orange, contamination lockout red. Follow ups never flash.
+// (or white, when the flash color is the same as the square). Tests, support requests and
+// messages are yellow, Shots pink, contamination lockout red. Follow ups never flash.
 export const FLASH_COLOR = {
-  support: "#60A5FA",
+  support: "#FACC15",
   shots: "#F472B6",
-  message: "#FB923C",
+  message: "#FACC15",
   lockout: "#EF4444"
 } as const;
 
-// Smart overdue coloring: white/default while normal, yellow once a room is
-// running meaningfully over the clinic's own recent average for that step,
-// red once it's running well over. Falls back to fixed minute thresholds
-// (THRESH_MIN) until a stage has enough completed samples to trust its
-// average.
-export const YELLOW_OVER_AVG = 1.2; // 20% over average
-export const RED_OVER_AVG = 1.5; // 50% over average
-export const MIN_SAMPLES_FOR_AVG = 20;
-export const AVG_WINDOW_DAYS = 30;
+// Provider name colors you can pick in Admin (Staff, next to each provider).
+export const NAME_COLORS: { name: string; hex: string }[] = [
+  { name: "Green", hex: "#15803D" },
+  { name: "Orange", hex: "#C2410C" },
+  { name: "Purple", hex: "#7E22CE" },
+  { name: "Teal", hex: "#0F766E" },
+  { name: "Pink", hex: "#BE185D" },
+  { name: "Gray", hex: "#475569" }
+];
+export const ANY_PROVIDER_COLOR = "#475569";
+
+// Swab and culture types counted in the Admin Tracker (counted at check out, only if still marked).
+export const SWAB_KEYS: { key: "rsv" | "flu" | "strep" | "covid" | "throat_culture" | "strep_culture" | "viral_panel"; label: string; col: string }[] = [
+  { key: "rsv", label: "RSV", col: "sw_rsv" },
+  { key: "flu", label: "Flu", col: "sw_flu" },
+  { key: "strep", label: "Strep", col: "sw_strep" },
+  { key: "covid", label: "COVID", col: "sw_covid" },
+  { key: "throat_culture", label: "Throat culture", col: "sw_throat_culture" },
+  { key: "strep_culture", label: "Strep culture", col: "sw_strep_culture" },
+  { key: "viral_panel", label: "Viral panel", col: "sw_viral_panel" }
+];
 
 export interface RequestDef {
   key: string;

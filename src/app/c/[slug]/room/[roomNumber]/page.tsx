@@ -7,9 +7,12 @@ import { useClinic } from "@/lib/clinicContext";
 import { LiveTimer } from "@/components/LiveTimer";
 import { ClaimPicker } from "@/components/ClaimPicker";
 import { BlackStage } from "@/components/BlackStage";
+import { ProviderName } from "@/components/ProviderName";
+import { TurnoverCountdown } from "@/components/TurnoverCountdown";
 import {
   STAGE_LABEL,
   ACTION_LABEL,
+  PREVIOUS_STAGE,
   REQUEST_GROUPS,
   REQUEST_LABEL,
   TEST_KEYS,
@@ -20,10 +23,19 @@ import {
   FOLLOWUP_REASON_LABEL
 } from "@/lib/constants";
 import { FollowupReason, FollowupTimeframe } from "@/lib/types";
-import { attentionItems, flashKind, FLASH_CLASS, isOverdue, personColor, personLabel, roomDirections } from "@/lib/util";
+import {
+  attentionItems,
+  flashKind,
+  FLASH_CLASS,
+  isOverdue,
+  personColor,
+  personLabel,
+  providerTag,
+  roomDirections
+} from "@/lib/util";
 
 export default function RoomPage({ params }: { params: { slug: string; roomNumber: string } }) {
-  const { rooms, hallways, staffById, avgByStage, countByStage, actions, me } = useClinic();
+  const { rooms, hallways, staff, staffById, timerTargets, actions, me } = useClinic();
   const [noteDraft, setNoteDraft] = useState<Record<string, string>>({});
   // Shown when the patient is leaving but rapid/molecular tests are still marked on the room.
   const [askCallbackFor, setAskCallbackFor] = useState<string | null>(null);
@@ -38,6 +50,9 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
   // Change room: pick a vacant room to move this patient to.
   const [changingRoom, setChangingRoom] = useState(false);
   const [swapError, setSwapError] = useState<string | null>(null);
+  // Go back one step, Undo check out and Change provider messages.
+  const [confirmBack, setConfirmBack] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const router = useRouter();
 
   const roomNumber = parseInt(params.roomNumber, 10);
@@ -56,7 +71,11 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
 
   const color = personColor(room);
   const label = personLabel(room, staffById);
-  const overdue = isOverdue(room);
+  const overdue = isOverdue(room, timerTargets);
+  const provider = providerTag(room, staffById);
+  const doctors = staff.filter((s) => s.role === "doctor");
+  const occupied = !room.contaminated && room.stage !== "vacant" && room.stage !== "turnover" && room.stage !== "needs_cleanup";
+  const prevStage = PREVIOUS_STAGE[room.stage];
   const items = attentionItems(room);
   const flash = flashKind(room);
 
@@ -75,7 +94,27 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
     else checkOutNow(false);
   };
 
-  const vacantRooms = rooms.filter((r) => r.stage === "vacant" && !r.contaminated && r.id !== room.id);
+  // A room that is still "Turning over" can take the patient too.
+  const vacantRooms = rooms.filter(
+    (r) => (r.stage === "vacant" || r.stage === "turnover") && !r.contaminated && r.id !== room.id
+  );
+  const goBackNow = async () => {
+    if (!prevStage) return;
+    setActionError(null);
+    const err = await actions.goBack(room.id, room.stage);
+    setConfirmBack(false);
+    if (err) setActionError(err);
+  };
+  const undoNow = async () => {
+    setActionError(null);
+    const err = await actions.undoCheckout(room.id);
+    if (err) setActionError(err);
+  };
+  const changeProvider = async (id: string) => {
+    setActionError(null);
+    const err = await actions.setVisitProvider(room.id, id || null);
+    if (err) setActionError(err);
+  };
   const moveTo = async (toId: string, toNumber: number) => {
     setSwapError(null);
     const err = await actions.swapRoom(room.id, toId);
@@ -136,6 +175,24 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
           {room.ticket ? ` · Ticket ${room.ticket}` : ""}
           {label ? ` · ${label}` : ""}
         </div>
+        {provider && (
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            <ProviderName tag={provider} className="text-base" />
+            <select
+              aria-label="Change provider"
+              className="border border-slate-300 dark:border-slate-600 rounded-lg px-2 py-1.5 text-sm bg-slate-50 dark:bg-slate-900"
+              value={room.visit_doctor_id ?? ""}
+              onChange={(e) => changeProvider(e.target.value)}
+            >
+              <option value="">Change provider: Any provider</option>
+              {doctors.map((d) => (
+                <option key={d.id} value={d.id}>
+                  Change provider: {d.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div className="flex items-center gap-3 mb-6 flex-wrap">
           {room.contaminated ? (
@@ -153,12 +210,11 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
                 {STAGE_LABEL[room.stage]}
               </span>
               <span className="text-xl font-semibold">
-                <LiveTimer
-                  startedAt={room.stage_started_at}
-                  stage={room.stage}
-                  avgByStage={avgByStage}
-                  countByStage={countByStage}
-                />
+                {room.stage === "turnover" ? (
+                  <TurnoverCountdown startedAt={room.stage_started_at} />
+                ) : (
+                  <LiveTimer startedAt={room.stage_started_at} stage={room.stage} />
+                )}
               </span>
             </>
           )}
@@ -177,6 +233,21 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
               Clear lockout, room cleaned
             </button>
           </>
+        ) : room.stage === "turnover" ? (
+          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900 text-sm">
+            <div className="text-slate-600 dark:text-slate-300 mb-2">
+              Checked out. This room shows as vacant when the 2 minutes are up. The front desk can still check in a
+              patient right now.
+            </div>
+            {room.undo && (
+              <button
+                className="w-full py-3 rounded-xl border border-slate-400 dark:border-slate-500 font-bold"
+                onClick={undoNow}
+              >
+                Undo check out
+              </button>
+            )}
+          </div>
         ) : room.stage === "vacant" ? (
           <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900 text-slate-500 text-sm text-center">
             Waiting for front desk to assign a patient.
@@ -252,8 +323,30 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
           </button>
         )}
 
-        {!room.contaminated && room.stage !== "vacant" && (
+        {actionError && <div className="mt-2 text-sm font-semibold text-red-600">{actionError}</div>}
+
+        {occupied && (
           <div className="mt-3">
+            {confirmBack && prevStage ? (
+              <div className="rounded-xl border-2 border-amber-400 bg-amber-50 dark:bg-amber-950 p-3 mb-2">
+                <div className="font-bold mb-1">Go back to {STAGE_LABEL[prevStage]}?</div>
+                <div className="text-sm mb-3">
+                  Use this if a step was tapped by mistake. The timer picks up where {STAGE_LABEL[prevStage]} left off,
+                  and the extra step is not counted.
+                </div>
+                <div className="flex gap-2">
+                  <button className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white font-bold" onClick={goBackNow}>
+                    Yes, go back
+                  </button>
+                  <button
+                    className="flex-1 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 font-bold"
+                    onClick={() => setConfirmBack(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : null}
             {changingRoom ? (
               <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3">
                 <div className="text-xs text-slate-500 mb-2">
@@ -282,12 +375,25 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
                 </button>
               </div>
             ) : (
-              <button
-                className="w-full py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-sm font-semibold"
-                onClick={() => setChangingRoom(true)}
-              >
-                Change room
-              </button>
+              <div className="flex gap-2">
+                {prevStage && (
+                  <button
+                    className="flex-1 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-sm font-semibold"
+                    onClick={() => {
+                      setActionError(null);
+                      setConfirmBack(true);
+                    }}
+                  >
+                    Go back one step
+                  </button>
+                )}
+                <button
+                  className="flex-1 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-sm font-semibold"
+                  onClick={() => setChangingRoom(true)}
+                >
+                  Change room
+                </button>
+              </div>
             )}
           </div>
         )}
@@ -364,7 +470,7 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
               </div>
             )}
 
-            {room.stage !== "vacant" && room.stage !== "needs_cleanup" && (
+            {occupied && (
               <>
                 <div className="text-xs text-slate-500 mt-5 mb-2">Follow up visit</div>
                 {followupOpenFor === room.id ? (

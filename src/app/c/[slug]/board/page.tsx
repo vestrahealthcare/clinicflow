@@ -7,8 +7,10 @@ import { LiveTimer } from "@/components/LiveTimer";
 import { FollowupStrip } from "@/components/FollowupStrip";
 import { ClaimPicker } from "@/components/ClaimPicker";
 import { BlackStage } from "@/components/BlackStage";
+import { ProviderName } from "@/components/ProviderName";
+import { TurnoverCountdown } from "@/components/TurnoverCountdown";
 import { STAGE_LABEL } from "@/lib/constants";
-import { attentionItems, boxColor, flashColors, flashKind, personLabel } from "@/lib/util";
+import { attentionItems, boxColor, flashColors, flashKind, personLabel, providerTag } from "@/lib/util";
 
 const GAP = 12;
 
@@ -30,9 +32,21 @@ function pickLayout(n: number, w: number, h: number) {
 }
 
 export default function BoardPage({ params }: { params: { slug: string } }) {
-  const { rooms, staffById, avgByStage, countByStage, actions, me } = useClinic();
+  const { rooms, staffById, actions, me } = useClinic();
   // "roomId:itemKey" of the item currently choosing a name.
   const [claiming, setClaiming] = useState<string | null>(null);
+  const claimingRef = useRef<string | null>(null);
+  claimingRef.current = claiming;
+
+  // Everything else on this screen updates by itself every 30 seconds. As an extra safety net
+  // for a screen that stays on all day, the whole page reloads every 5 minutes (unless someone
+  // is in the middle of picking a name).
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (claimingRef.current === null) window.location.reload();
+    }, 5 * 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   // Size the grid to the space left on the screen, so every room square is the same size,
   // fills most of the screen, and never runs past the bottom.
@@ -89,9 +103,10 @@ export default function BoardPage({ params }: { params: { slug: string } }) {
           const [flashA, flashB] = flash ? flashColors(room, flash) : [base, base];
           const items = attentionItems(room);
           const label = personLabel(room, staffById);
+          const provider = providerTag(room, staffById);
           // A busy room (several requests) shrinks its own text a little so everything stays
           // visible without scrolling. Quiet rooms use the full size.
-          const needEm = 7.5 + items.reduce((n, it) => n + 2.5 + (it.detail ? 1.3 : 0) + (it.key === "note" && room.note ? 1.3 : 0), 0);
+          const needEm = 8 + items.reduce((n, it) => n + 2.5 + (it.detail ? 1.3 : 0) + (it.key === "note" && room.note ? 1.3 : 0), 0);
           const cardPx = Math.round(Math.max(fontPx * 0.7, Math.min(fontPx, cellH / needEm)) * 10) / 10;
 
           return (
@@ -121,18 +136,17 @@ export default function BoardPage({ params }: { params: { slug: string } }) {
                   {room.contaminated ? "Contamination lockout" : STAGE_LABEL[room.stage]}
                   {label ? ` · ${label}` : ""}
                 </div>
-                <div className="text-[1.6em] font-semibold leading-tight">
-                  {room.contaminated ? (
-                    "—"
-                  ) : (
-                    <LiveTimer
-                      startedAt={room.stage_started_at}
-                      stage={room.stage}
-                      avgByStage={avgByStage}
-                      countByStage={countByStage}
-                      pill
-                    />
-                  )}
+                <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                  <div className="text-[1.6em] font-semibold leading-tight">
+                    {room.contaminated ? (
+                      "—"
+                    ) : room.stage === "turnover" ? (
+                      <TurnoverCountdown startedAt={room.stage_started_at} />
+                    ) : (
+                      <LiveTimer startedAt={room.stage_started_at} stage={room.stage} pill />
+                    )}
+                  </div>
+                  {provider && <ProviderName tag={provider} className="text-[0.8em]" />}
                 </div>
               </Link>
 

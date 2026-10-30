@@ -2,13 +2,14 @@
 
 import { useState } from "react";
 import { Staff, StaffRole } from "@/lib/types";
-import { MAX_STAFF, ROLE_COLOR } from "@/lib/constants";
+import { MAX_STAFF, ROLE_COLOR, NAME_COLORS } from "@/lib/constants";
 
 interface Props {
   staff: Staff[];
   onAdd: (role: StaffRole) => Promise<string | null>;
   onRename: (id: string, name: string) => Promise<void>;
   onRemove: (id: string) => Promise<void>;
+  onColor: (id: string, color: string | null) => Promise<void>;
 }
 
 function RoleColumn({
@@ -17,7 +18,8 @@ function RoleColumn({
   people,
   onAdd,
   onRename,
-  onRemove
+  onRemove,
+  onColor
 }: {
   role: StaffRole;
   label: string;
@@ -25,6 +27,7 @@ function RoleColumn({
   onAdd: Props["onAdd"];
   onRename: Props["onRename"];
   onRemove: Props["onRemove"];
+  onColor: Props["onColor"];
 }) {
   const [error, setError] = useState<string | null>(null);
   const color = ROLE_COLOR[role];
@@ -42,22 +45,49 @@ function RoleColumn({
       </div>
       <div className="space-y-2">
         {people.map((p) => (
-          <div key={p.id} className="flex items-center gap-2">
-            <input
-              className="flex-1 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 rounded-lg px-2.5 py-1.5 text-sm"
-              defaultValue={p.name}
-              onBlur={(e) => {
-                const v = e.target.value.trim();
-                if (v && v !== p.name) onRename(p.id, v);
-              }}
-            />
-            <button
-              className="text-slate-400 hover:text-red-600 text-sm px-1"
-              title={`Remove ${p.name}`}
-              onClick={() => onRemove(p.id)}
-            >
-              ✕
-            </button>
+          <div key={p.id}>
+            <div className="flex items-center gap-2">
+              <input
+                className="flex-1 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 rounded-lg px-2.5 py-1.5 text-sm font-semibold"
+                style={role === "doctor" && p.name_color ? { color: p.name_color } : undefined}
+                defaultValue={p.name}
+                onBlur={(e) => {
+                  const v = e.target.value.trim();
+                  if (v && v !== p.name) onRename(p.id, v);
+                }}
+              />
+              <button
+                className="text-slate-400 hover:text-red-600 text-sm px-1"
+                title={`Remove ${p.name}`}
+                onClick={() => onRemove(p.id)}
+              >
+                ✕
+              </button>
+            </div>
+            {role === "doctor" && (
+              <div className="flex items-center gap-1.5 mt-1.5 mb-1 flex-wrap" aria-label={`Name color for ${p.name}`}>
+                <span className="text-xs text-slate-500 mr-0.5">Name color</span>
+                {NAME_COLORS.map((c) => (
+                  <button
+                    key={c.hex}
+                    title={c.name}
+                    aria-label={c.name}
+                    className={`w-6 h-6 rounded-full border-2 ${
+                      p.name_color?.toLowerCase() === c.hex.toLowerCase()
+                        ? "border-slate-900 dark:border-white scale-110"
+                        : "border-transparent"
+                    }`}
+                    style={{ backgroundColor: c.hex }}
+                    onClick={() => onColor(p.id, c.hex)}
+                  />
+                ))}
+                {p.name_color && (
+                  <button className="text-xs text-slate-400 underline ml-1" onClick={() => onColor(p.id, null)}>
+                    None
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -78,7 +108,7 @@ function RoleColumn({
   );
 }
 
-export function StaffRoster({ staff, onAdd, onRename, onRemove }: Props) {
+export function StaffRoster({ staff, onAdd, onRename, onRemove, onColor }: Props) {
   const providers = staff.filter((s) => s.role === "doctor");
   const nurses = staff.filter((s) => s.role === "nurse");
   const frontDesk = staff.filter((s) => s.role === "frontdesk");
@@ -88,12 +118,28 @@ export function StaffRoster({ staff, onAdd, onRename, onRemove }: Props) {
       <h3 className="font-bold mb-1">Providers, nurses and front desk</h3>
       <p className="text-sm text-slate-500 mb-4">
         Up to {MAX_STAFF.doctor} providers, {MAX_STAFF.nurse} nurses and {MAX_STAFF.frontdesk} front desk staff.
-        Providers and nurses can be assigned to rooms; everyone on these lists can pick their name for &ldquo;I&apos;ve
+        Providers and nurses can be assigned to rooms. A provider's name color is how their name shows on the board and room pages. Everyone on these lists can pick their name for &ldquo;I&apos;ve
         got it&rdquo;.
       </p>
       <div className="grid gap-6 sm:grid-cols-3">
-        <RoleColumn role="doctor" label="Provider" people={providers} onAdd={onAdd} onRename={onRename} onRemove={onRemove} />
-        <RoleColumn role="nurse" label="Nurse" people={nurses} onAdd={onAdd} onRename={onRename} onRemove={onRemove} />
+        <RoleColumn
+          role="doctor"
+          label="Provider"
+          people={providers}
+          onAdd={onAdd}
+          onRename={onRename}
+          onRemove={onRemove}
+          onColor={onColor}
+        />
+        <RoleColumn
+          role="nurse"
+          label="Nurse"
+          people={nurses}
+          onAdd={onAdd}
+          onRename={onRename}
+          onRemove={onRemove}
+          onColor={onColor}
+        />
         <RoleColumn
           role="frontdesk"
           label="Front desk"
@@ -101,6 +147,7 @@ export function StaffRoster({ staff, onAdd, onRename, onRemove }: Props) {
           onAdd={onAdd}
           onRename={onRename}
           onRemove={onRemove}
+          onColor={onColor}
         />
       </div>
     </div>

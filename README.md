@@ -20,8 +20,9 @@ supabase/schema.sql       All tables, security policies, and the database
 supabase/update_2026_10_27.sql
 supabase/update_2026_10_27b.sql
 supabase/update_2026_10_28.sql
-                          (the latest, includes everything in the earlier
-                          second update). Upgrades for a project that already ran an older
+supabase/update_2026_10_30.sql
+                          (the latest, "update 4". It includes everything in
+                          update 3, so it is safe whether or not update 3 ran). Upgrades for a project that already ran an older
                           schema.sql. Run them in order in the SQL editor,
                           BEFORE deploying the matching code. Each is safe
                           to run more than once.
@@ -172,22 +173,50 @@ nurse roster from its own Admin page after that.
 
 ## How the colors work
 
-On the Fishbowl board the color shows the room's status: white vacant, light
-gray occupied, blue ready for the doctor, red contamination lockout. A
-flashing square means someone is being asked for something (see Flashing
-above). The specific nurse or provider shows as text on the square.
+On the Fishbowl board the color shows the room's status: white vacant (and
+"Turning over"), gray occupied, blue ready for the doctor, red contamination
+lockout. A flashing square means someone is being asked for something (see
+Flashing above): tests, support requests and messages blink yellow, Shots
+blink pink, a lockout blinks red. Every occupied square shows the visit's
+provider in their name color (set per provider in Admin, Setup tab, next to
+each provider; a provider with no color shows in dark gray).
 
 ## How the timer coloring works
 
-Every elapsed time reads in the normal text color while a room is running
-normally. Once a step has at least 20 completed instances in the trailing
-30 days, the app compares the current room against that clinic's own recent
-average for that exact step: 20% over average turns the time yellow, 50%
-over turns it red. Until a step has that much history (a brand new clinic,
-or a step that rarely happens), it falls back to fixed minute thresholds
-instead, listed at the bottom of the Admin page. Averages refresh about once
-a minute, so a newly completed visit affects the color within a minute, not
-instantly.
+Timers use fixed minutes per step that you set in Admin, Setup tab, "Timer
+colors". A timer turns yellow after the yellow minutes and red after the red
+minutes. Starting values (yellow / red): Ready for nurse 5 / 8, Prepping 8 / 12,
+Ready for doctor 10 / 15, Doctor in room 20 / 30, Shots 10 / 15, Other 10 / 15.
+The numbers are saved in the database (clinics.timer_targets), so every screen
+uses the same ones. Averages no longer change the colors.
+
+## Update 4 behavior
+
+- **Check out and turnover.** Check out puts the room in "Turning over" for
+  2 minutes (2:00 countdown on the board), then it shows as vacant by itself.
+  The front desk can check a patient into a turning over room right away.
+  "Undo check out" on the room page works during those 2 minutes, until a new
+  patient is checked in or Pt departed is tapped.
+- **Go back one step.** On the room page, with a confirm. The step that was
+  tapped by mistake is removed from the timing history and the timer picks up
+  from the original start of the earlier step. Not available at Ready for nurse.
+- **Provider for the visit.** Each patient has their own provider (check in
+  box). It can be changed on the room page or in the front desk table. The
+  room's usual provider in Today's staffing is never overwritten, and Change
+  room moves the visit's provider with the patient.
+- **Admin, Tracker tab.** Pick a date. Tables show That day, Last 7 days, Last
+  30 days and All time for step times, door to door time, provider visits
+  (with per clinic day averages) and swab counts (RSV, Flu, Strep, COVID,
+  Throat culture, Strep culture, Viral panel). Steps over 3 hours are left out
+  of time averages. "Reset 30 day averages" restarts only the Last 30 days
+  columns. "Erase all timing history" erases the Tracker too, and cannot be
+  undone. The Tracker stores counts and times only, never initials.
+- **Staying up to date.** Every screen refetches rooms, staff and settings
+  every 30 seconds, when the tab comes back, and when the network returns, and
+  reconnects its live connection by itself. The header shows "Updated X ago"
+  and turns red only after 4 minutes without a successful sync. The Fishbowl
+  board also reloads the whole page every 5 minutes as a safety net. Set the
+  big screen computer to never sleep.
 
 ## If the home page says "No clinics yet" or shows a permission error
 

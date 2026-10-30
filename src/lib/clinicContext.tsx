@@ -1,6 +1,7 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState, useCallback } from "react";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabase } from "./supabaseClient";
 import {
   Clinic,
@@ -16,13 +17,74 @@ import {
   CallbackStatus,
   Checkout,
   FollowupTimeframe,
-  FollowupReason
+  FollowupReason,
+  TimerTargets,
+  TrackerData
 } from "./types";
-import { clinicToday, dateKeyInTz } from "./util";
-import { STAGE_ORDER, AVG_WINDOW_DAYS, MAX_STAFF, ROLE_COLOR } from "./constants";
+import { clinicToday, dateKeyInTz, mergeTimerTargets } from "./util";
+import { MAX_STAFF, ROLE_COLOR, TURNOVER_MS } from "./constants";
+
+const HISTORY_DAYS = 30;
+const UPDATE_FILE = "clinicflow-update-4-2026-10-30.sql";
+
+function missingFunction(err: { code?: string; message: string }, name: string): boolean {
+  return err.code === "PGRST202" || err.code === "42883" || new RegExp(`${name}|schema cache`, "i").test(err.message);
+}
+
+const NEEDS_UPDATE = `The database update is missing. Run ${UPDATE_FILE} in the Supabase SQL Editor, then try again.`;
+
+/**
+ * A realtime subscription that rebuilds itself: if the connection errors, times out or closes,
+ * it quietly subscribes again after 5 seconds, and calls onSubscribed every time it connects
+ * so the screen can fetch anything it missed.
+ */
+function useLiveChannel(
+  key: string | null,
+  build: (ch: RealtimeChannel) => RealtimeChannel,
+  onSubscribed: () => void
+) {
+  const buildRef = useRef(build);
+  buildRef.current = build;
+  const subRef = useRef(onSubscribed);
+  subRef.current = onSubscribed;
+  useEffect(() => {
+    if (!key) return;
+    let disposed = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let kill: (() => void) | null = null;
+
+    function connect() {
+      if (disposed) return;
+      let dead = false;
+      const ch = buildRef.current(supabase.channel(`${key}-${Math.random().toString(36).slice(2, 8)}`));
+      kill = () => {
+        dead = true;
+        supabase.removeChannel(ch);
+      };
+      ch.subscribe((status) => {
+        if (dead || disposed) return;
+        if (status === "SUBSCRIBED") {
+          subRef.current();
+        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+          clearTimeout(retry);
+          retry = setTimeout(() => {
+            kill?.();
+            connect();
+          }, 5000);
+        }
+      });
+    }
+    connect();
+    return () => {
+      disposed = true;
+      clearTimeout(retry);
+      kill?.();
+    };
+  }, [key]);
+}
 
 export interface AdvanceOptions {
-  /** From "with_doctor" only: "shots" or "other". Without it the visit ends and the room is vacant. */
+  /** From "with_doctor" only: "shots" or "other". Without it, use checkOut to end the visit. */
   target?: Stage;
   /** The stage the tablet was showing when tapped; the tap is ignored if the room has already moved on. */
   expected?: Stage;
@@ -34,7 +96,7 @@ export interface AdvanceOptions {
 
 interface ClinicActions {
   advanceStage: (roomId: string, opts?: AdvanceOptions) => Promise<void>;
-  /** Check-out: room goes straight to vacant, patient goes to the waiting room list. */
+  /** Check-out: the patient goes to the waiting room list and the room shows Turning over for 2 minutes. */
   checkOut: (roomId: string, opts?: { expected?: Stage; addCallback?: boolean }) => Promise<void>;
   setFollowup: (
     roomId: string,
@@ -44,11 +106,25 @@ interface ClinicActions {
   ) => Promise<void>;
   /** Free text results typed on a Call with results task. */
   setCallbackNote: (callbackId: string, note: string) => Promise<void>;
+  /** Go back one step in the room (timer resumes from the earlier step's original start). Returns an error or null. */
+  goBack: (roomId: string, expected: Stage) => Promise<string | null>;
+  /** Undo check out, within the 2 minute Turning over. Returns an error or null. */
+  undoCheckout: (roomId: string) => Promise<string | null>;
+  /** Change the provider for this visit only (null = any provider). */
+  setVisitProvider: (roomId: string, doctorId: string | null) => Promise<string | null>;
+  /** Yellow and red minutes for each step. */
+  setTimerTargets: (targets: TimerTargets) => Promise<string | null>;
+  /** The Admin Tracker numbers for a date (YYYY-MM-DD) and everything before it. */
+  getTrackerData: (day: string) => Promise<{ data: TrackerData | null; error: string | null }>;
+  /** Pick the color of a provider's name (hex), or null to clear. */
+  setStaffColor: (staffId: string, color: string | null) => Promise<void>;
+  /** Fetch rooms, staff, settings and lists again right now. */
+  refresh: () => Promise<void>;
   /** Change room: moves the patient to a vacant room. Returns an error message, or null when it worked. */
   swapRoom: (fromRoomId: string, toRoomId: string) => Promise<string | null>;
-  /** Start the 30 day averages fresh from now (old timing data is kept). */
+  /** Restart the Tracker's 30 day columns from now (old data is kept). */
   resetAverages: () => Promise<void>;
-  /** Permanently erase all timing history. Cannot be undone. */
+  /** Permanently erase all timing history and all Tracker data. Cannot be undone. */
   eraseTimingHistory: () => Promise<void>;
   /** Start of day: every room (not in lockout) back to vacant, checkout list cleared, ticket numbers restart. */
   resetDay: () => Promise<void>;
@@ -108,11 +184,12 @@ interface ClinicContextValue {
   staff: Staff[];
   staffById: Record<string, Staff>;
   rooms: Room[];
-  /** Completed stage instances in the trailing AVG_WINDOW_DAYS, used for both
-   *  the admin dashboard and the smart yellow/red timer coloring everywhere. */
+  /** Completed stage instances in the last 30 days (Admin, provider idle time). */
   history: RoomHistoryRow[];
-  avgByStage: Partial<Record<Stage, number>>;
-  countByStage: Partial<Record<Stage, number>>;
+  /** Yellow and red minutes per step (Admin, Timer colors). */
+  timerTargets: TimerTargets;
+  /** When this screen last got fresh data from the database (ms since 1970), or null. */
+  lastSyncAt: number | null;
   loading: boolean;
   error: string | null;
   actions: ClinicActions;
@@ -152,10 +229,15 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
   const [checkouts, setCheckouts] = useState<Checkout[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
+  const [expiredKey, setExpiredKey] = useState("");
+  const clinicRef = useRef<Clinic | null>(null);
+  clinicRef.current = clinic;
+  const lastRefreshStart = useRef(0);
 
   const loadHistory = useCallback(async (clinicId: string, resetAt?: string | null) => {
     // The last 30 days, or since the Admin "reset averages" button was pressed if that is later.
-    let sinceMs = Date.now() - AVG_WINDOW_DAYS * 24 * 3600 * 1000;
+    let sinceMs = Date.now() - HISTORY_DAYS * 24 * 3600 * 1000;
     if (resetAt) sinceMs = Math.max(sinceMs, new Date(resetAt).getTime());
     const since = new Date(sinceMs).toISOString();
     const { data } = await supabase
@@ -242,7 +324,10 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
         loadHistory(clinicRow.id, (clinicRow as Clinic).averages_reset_at),
         loadFollowups(clinicRow.id, (clinicRow as Clinic).timezone)
       ]);
-      if (!cancelled) setLoading(false);
+      if (!cancelled) {
+        setLoading(false);
+        setLastSyncAt(Date.now());
+      }
     }
 
     load();
@@ -251,16 +336,44 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
     };
   }, [slug, loadHistory, loadFollowups]);
 
-  // Realtime subscription: keep `rooms` in sync the instant any tablet changes one.
-  useEffect(() => {
-    if (!clinic) return;
+  // Fetch rooms, staff, settings and the lists again. Runs every 30 seconds, when the tab comes
+  // back or the network returns, and whenever a live connection (re)connects, so a screen that
+  // missed live updates catches up on its own.
+  const refreshAll = useCallback(async () => {
+    const c = clinicRef.current;
+    if (!c) return;
+    if (Date.now() - lastRefreshStart.current < 1500) return;
+    lastRefreshStart.current = Date.now();
+    try {
+      const [cl, ro, st] = await Promise.all([
+        supabase.from("clinics").select("*").eq("id", c.id).single(),
+        supabase.from("rooms").select("*").eq("clinic_id", c.id).order("room_number"),
+        supabase.from("staff").select("*").eq("clinic_id", c.id).order("sort_order")
+      ]);
+      const same = <T,>(prev: T, next: T) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next);
+      if (!cl.error && cl.data) setClinic((prev) => same(prev, cl.data as Clinic));
+      if (!ro.error && ro.data) setRooms((prev) => same(prev, ro.data as Room[]));
+      if (!st.error && st.data) setStaff((prev) => same(prev, st.data as Staff[]));
+      await loadFollowups(c.id, c.timezone);
+      if (!cl.error && !ro.error && !st.error) setLastSyncAt(Date.now());
+    } catch {
+      // offline: the "Updated" indicator turns red if this lasts
+    }
+  }, [loadFollowups]);
 
-    const channel = supabase
-      .channel(`clinic-rooms-${clinic.id}`)
-      .on(
+  const clinicId = clinic?.id ?? null;
+  const touch = useCallback(() => setLastSyncAt(Date.now()), []);
+
+  // Live updates for rooms, the clinic settings row, staff, and the follow up lists. Each one
+  // reconnects by itself if the connection drops.
+  useLiveChannel(
+    clinicId ? `clinic-rooms-${clinicId}` : null,
+    (ch) =>
+      ch.on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "rooms", filter: `clinic_id=eq.${clinic.id}` },
+        { event: "*", schema: "public", table: "rooms", filter: `clinic_id=eq.${clinicId}` },
         (payload) => {
+          touch();
           setRooms((prev) => {
             if (payload.eventType === "DELETE") {
               return prev.filter((r) => r.id !== (payload.old as Room).id);
@@ -273,39 +386,32 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
             return next;
           });
         }
-      )
-      .subscribe();
+      ),
+    refreshAll
+  );
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [clinic]);
-
-  // Also refresh the clinic row itself when room_count or ticket counter change elsewhere.
-  useEffect(() => {
-    if (!clinic) return;
-    const channel = supabase
-      .channel(`clinic-row-${clinic.id}`)
-      .on(
+  useLiveChannel(
+    clinicId ? `clinic-row-${clinicId}` : null,
+    (ch) =>
+      ch.on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "clinics", filter: `id=eq.${clinic.id}` },
-        (payload) => setClinic(payload.new as Clinic)
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [clinic?.id]);
-
-  // Staff roster changes (names added/renamed/removed) reflected everywhere live.
-  useEffect(() => {
-    if (!clinic) return;
-    const channel = supabase
-      .channel(`clinic-staff-${clinic.id}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "staff", filter: `clinic_id=eq.${clinic.id}` },
+        { event: "UPDATE", schema: "public", table: "clinics", filter: `id=eq.${clinicId}` },
         (payload) => {
+          touch();
+          setClinic(payload.new as Clinic);
+        }
+      ),
+    refreshAll
+  );
+
+  useLiveChannel(
+    clinicId ? `clinic-staff-${clinicId}` : null,
+    (ch) =>
+      ch.on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "staff", filter: `clinic_id=eq.${clinicId}` },
+        (payload) => {
+          touch();
           setStaff((prev) => {
             if (payload.eventType === "DELETE") return prev.filter((s) => s.id !== (payload.old as Staff).id);
             const updated = payload.new as Staff;
@@ -316,40 +422,72 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
             return next;
           });
         }
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [clinic?.id]);
+      ),
+    refreshAll
+  );
 
-  // Lab pickup and callback lists: refetch whenever any of the three tables change.
+  // Lab pickup, callback and checking out lists: refetch whenever any of the tables change.
+  useLiveChannel(
+    clinicId ? `clinic-followups-${clinicId}` : null,
+    (ch) => {
+      let c = ch;
+      ["lab_samples", "lab_pickups", "result_callbacks", "checkouts"].forEach((table) => {
+        c = c.on(
+          "postgres_changes",
+          { event: "*", schema: "public", table, filter: `clinic_id=eq.${clinicId}` },
+          () => {
+            touch();
+            const cl = clinicRef.current;
+            if (cl) loadFollowups(cl.id, cl.timezone);
+          }
+        );
+      });
+      return c;
+    },
+    refreshAll
+  );
+
+  // Every 30 seconds, and the moment the tab is shown, focused or back online.
   useEffect(() => {
-    if (!clinic) return;
-    const refetch = () => loadFollowups(clinic.id, clinic.timezone);
-    let channel = supabase.channel(`clinic-followups-${clinic.id}`);
-    ["lab_samples", "lab_pickups", "result_callbacks", "checkouts"].forEach((table) => {
-      channel = channel.on(
-        "postgres_changes",
-        { event: "*", schema: "public", table, filter: `clinic_id=eq.${clinic.id}` },
-        refetch
-      );
-    });
-    channel.subscribe();
-    const id = setInterval(refetch, 30_000);
+    if (!clinicId) return;
+    const id = setInterval(refreshAll, 30_000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshAll();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", refreshAll);
+    window.addEventListener("online", refreshAll);
     return () => {
       clearInterval(id);
-      supabase.removeChannel(channel);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", refreshAll);
+      window.removeEventListener("online", refreshAll);
     };
-  }, [clinic?.id, clinic?.timezone, loadFollowups]);
+  }, [clinicId, refreshAll]);
 
-  // Averages feed the smart timer coloring; a new visit finishing every so
-  // often is enough reason to refresh rather than needing this instantly.
+  // Timing history (Admin, provider idle time): refresh once a minute.
   useEffect(() => {
-    if (!clinic) return;
-    const id = setInterval(() => loadHistory(clinic.id, clinic.averages_reset_at), 60_000);
+    if (!clinicId) return;
+    const id = setInterval(() => {
+      const c = clinicRef.current;
+      if (c) loadHistory(c.id, c.averages_reset_at);
+    }, 60_000);
     return () => clearInterval(id);
-  }, [clinic, loadHistory]);
+  }, [clinicId, loadHistory]);
+
+  // A room 2 minutes past check out shows as vacant. No scheduler needed: each screen works it out.
+  const roomsRef = useRef<Room[]>([]);
+  roomsRef.current = rooms;
+  useEffect(() => {
+    const id = setInterval(() => {
+      const k = roomsRef.current
+        .filter((r) => r.stage === "turnover" && Date.now() - new Date(r.stage_started_at).getTime() >= TURNOVER_MS)
+        .map((r) => r.id)
+        .join(",");
+      setExpiredKey(k);
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // When the averages are reset or erased (here or on another device), reload right away.
   const resetAt = clinic?.averages_reset_at ?? null;
@@ -360,25 +498,7 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
 
   const staffById = useMemo(() => Object.fromEntries(staff.map((s) => [s.id, s])), [staff]);
 
-  const { avgByStage, countByStage } = useMemo(() => {
-    const sums: Partial<Record<Stage, number>> = {};
-    const counts: Partial<Record<Stage, number>> = {};
-    STAGE_ORDER.forEach((s) => {
-      sums[s] = 0;
-      counts[s] = 0;
-    });
-    history.forEach((h) => {
-      if (sums[h.stage] !== undefined) {
-        sums[h.stage]! += h.duration_ms;
-        counts[h.stage]! += 1;
-      }
-    });
-    const avg: Partial<Record<Stage, number>> = {};
-    STAGE_ORDER.forEach((s) => {
-      avg[s] = counts[s] ? sums[s]! / counts[s]! : 0;
-    });
-    return { avgByStage: avg, countByStage: counts };
-  }, [history]);
+  const timerTargets = useMemo(() => mergeTimerTargets(clinic?.timer_targets), [clinic?.timer_targets]);
 
   const advanceStage = useCallback(async (roomId: string, opts?: AdvanceOptions) => {
     await supabase.rpc("advance_room_stage", {
@@ -429,12 +549,77 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
   const swapRoom = useCallback(async (fromRoomId: string, toRoomId: string) => {
     const { data, error: rpcErr } = await supabase.rpc("swap_room", { p_from: fromRoomId, p_to: toRoomId });
     if (rpcErr) {
-      const missing = rpcErr.code === "PGRST202" || rpcErr.code === "42883" || /swap_room|schema cache/i.test(rpcErr.message);
-      return missing
-        ? "Change room could not run because the database update is missing. Run clinicflow-update-3-2026-10-28.sql in the Supabase SQL Editor, then try again."
-        : `Change room failed: ${rpcErr.message}`;
+      return missingFunction(rpcErr, "swap_room") ? `Change room could not run. ${NEEDS_UPDATE}` : `Change room failed: ${rpcErr.message}`;
     }
     return data === true ? null : "That room is no longer available. Pick another vacant room.";
+  }, []);
+
+  const goBack = useCallback(async (roomId: string, expected: Stage) => {
+    const { data, error: rpcErr } = await supabase.rpc("go_back_room", { p_room_id: roomId, p_expected_stage: expected });
+    if (rpcErr) {
+      return missingFunction(rpcErr, "go_back_room") ? `Go back could not run. ${NEEDS_UPDATE}` : `Go back failed: ${rpcErr.message}`;
+    }
+    return data === true ? null : "The room has already moved on, so nothing was changed.";
+  }, []);
+
+  const undoCheckout = useCallback(
+    async (roomId: string) => {
+      const { data, error: rpcErr } = await supabase.rpc("undo_checkout", { p_room_id: roomId });
+      refreshFollowups();
+      if (rpcErr) {
+        return missingFunction(rpcErr, "undo_checkout")
+          ? `Undo check out could not run. ${NEEDS_UPDATE}`
+          : `Undo check out failed: ${rpcErr.message}`;
+      }
+      return data === true ? null : "Check out can no longer be undone (the 2 minutes are up, a new patient was checked in, or Pt departed was tapped).";
+    },
+    [refreshFollowups]
+  );
+
+  const setVisitProvider = useCallback(async (roomId: string, doctorId: string | null) => {
+    const { error: rpcErr } = await supabase.rpc("set_visit_provider", { p_room_id: roomId, p_doctor_id: doctorId });
+    if (rpcErr) {
+      return missingFunction(rpcErr, "set_visit_provider")
+        ? `Change provider could not run. ${NEEDS_UPDATE}`
+        : `Change provider failed: ${rpcErr.message}`;
+    }
+    return null;
+  }, []);
+
+  const setTimerTargets = useCallback(
+    async (targets: TimerTargets) => {
+      if (!clinic) return "No clinic loaded.";
+      const { error: rpcErr } = await supabase.rpc("set_timer_targets", { p_clinic_id: clinic.id, p_targets: targets });
+      if (rpcErr) {
+        return missingFunction(rpcErr, "set_timer_targets")
+          ? `Timer colors could not be saved. ${NEEDS_UPDATE}`
+          : `Timer colors could not be saved: ${rpcErr.message}`;
+      }
+      setClinic((c) => (c ? { ...c, timer_targets: targets } : c));
+      return null;
+    },
+    [clinic]
+  );
+
+  const getTrackerData = useCallback(
+    async (day: string) => {
+      if (!clinic) return { data: null, error: "No clinic loaded." };
+      const { data, error: rpcErr } = await supabase.rpc("tracker_data", { p_clinic_id: clinic.id, p_day: day });
+      if (rpcErr) {
+        return {
+          data: null,
+          error: missingFunction(rpcErr, "tracker_data")
+            ? `The Tracker needs the database update. Run ${UPDATE_FILE} in the Supabase SQL Editor, then reload.`
+            : rpcErr.message
+        };
+      }
+      return { data: data as TrackerData, error: null };
+    },
+    [clinic]
+  );
+
+  const setStaffColor = useCallback(async (staffId: string, color: string | null) => {
+    await supabase.from("staff").update({ name_color: color }).eq("id", staffId);
   }, []);
 
   const resetAverages = useCallback(async () => {
@@ -450,9 +635,8 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
     if (!clinic) return;
     const { error: rpcErr } = await supabase.rpc("erase_timing_history", { p_clinic_id: clinic.id });
     if (!rpcErr) {
-      const now = new Date().toISOString();
       setHistory([]);
-      setClinic((c) => (c ? { ...c, averages_reset_at: now } : c));
+      setClinic((c) => (c ? { ...c, averages_reset_at: null } : c));
     }
   }, [clinic]);
 
@@ -547,19 +731,17 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
       p_set_doctor: doctorId !== undefined
     });
     if (rpcErr) {
-      const missing =
-        rpcErr.code === "PGRST202" || rpcErr.code === "42883" || /assign_patient|schema cache/i.test(rpcErr.message);
       return {
         ticket: null,
-        error: missing
-          ? "Check in could not run because the database update is missing. Run clinicflow-update-2-2026-10-27b.sql in the Supabase SQL Editor, then try again."
+        error: missingFunction(rpcErr, "assign_patient")
+          ? `Check in could not run. ${NEEDS_UPDATE}`
           : `Check in failed: ${rpcErr.message}`
       };
     }
     const ticket = (data as string) ?? null;
     return {
       ticket,
-      error: ticket ? null : "That room is no longer vacant. Pick another room."
+      error: ticket ? null : "That room is no longer available. Pick another room."
     };
   }, []);
 
@@ -618,10 +800,17 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
 
   // Rooms beyond the clinic's "rooms in service" setting are hidden everywhere
   // (room tabs, board, front desk, waiting room, admin), per the original spec.
-  const visibleRooms = useMemo(
-    () => (clinic ? rooms.filter((r) => r.room_number <= clinic.room_count) : rooms),
-    [rooms, clinic]
-  );
+  // A room still "Turning over" after 2 minutes shows as vacant.
+  const visibleRooms = useMemo(() => {
+    const list = clinic ? rooms.filter((r) => r.room_number <= clinic.room_count) : rooms;
+    return list.map((r) =>
+      r.stage === "turnover" && Date.now() - new Date(r.stage_started_at).getTime() >= TURNOVER_MS
+        ? { ...r, stage: "vacant" as Stage, undo: null }
+        : r
+    );
+    // expiredKey changes the moment a room's 2 minutes are up
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rooms, clinic, expiredKey]);
 
   const followups = useMemo<FollowupSummary>(() => {
     const tz = clinic?.timezone;
@@ -658,13 +847,20 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
     staffById,
     rooms: visibleRooms,
     history,
-    avgByStage,
-    countByStage,
+    timerTargets,
+    lastSyncAt,
     loading,
     error,
     actions: {
       advanceStage,
       checkOut,
+      goBack,
+      undoCheckout,
+      setVisitProvider,
+      setTimerTargets,
+      getTrackerData,
+      setStaffColor,
+      refresh: refreshAll,
       setFollowup,
       setCallbackNote,
       swapRoom,

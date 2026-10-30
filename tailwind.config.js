@@ -1,5 +1,8 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
+  // Dark mode follows the device setting, except inside a ".light" wrapper (used on the
+  // black background pages, where the room squares stay white whatever the device setting).
+  darkMode: ["variant", ["@media (prefers-color-scheme: dark) { &:not(.light *) }"]],
   content: ["./src/app/**/*.{ts,tsx}", "./src/components/**/*.{ts,tsx}"],
   theme: {
     extend: {

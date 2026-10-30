@@ -1,15 +1,14 @@
-import { Hallway, Room, Stage } from "./types";
+import { Hallway, Room, Stage, Staff, TimerStage, TimerTargets } from "./types";
 import {
   BOX_COLOR,
   FLASH_COLOR,
-  THRESH_MIN,
+  DEFAULT_TIMER_TARGETS,
+  ANY_PROVIDER_COLOR,
+  TURNOVER_MS,
   HOUSEKEEPING_COLOR,
   VACANT_COLOR,
   LOCKOUT_COLOR,
   ROLE_COLOR,
-  YELLOW_OVER_AVG,
-  RED_OVER_AVG,
-  MIN_SAMPLES_FOR_AVG,
   ALL_REQUEST_KEYS,
   REQUEST_LABEL,
   FOLLOWUP_TIMEFRAME_LABEL,
@@ -35,16 +34,32 @@ export function elapsedMs(room: Room): number {
 }
 
 /**
- * "Overdue" for the board's red border flash / flagging on lists. Uses the
- * fixed fallback minutes, independent of the smart yellow/red timer text
- * coloring below, so a totally new clinic with no history yet still gets
- * sane overdue flags on day one.
+ * "Overdue" (flagging on lists): the room has been in its step longer than the
+ * red minutes set for that step in Admin (Timer colors).
  */
-export function isOverdue(room: Room): boolean {
+export function isOverdue(room: Room, targets?: TimerTargets | null): boolean {
   if (room.contaminated) return false;
-  const th = THRESH_MIN[room.stage];
-  if (!th) return false;
-  return elapsedMs(room) > th * 60000;
+  const t = (targets ?? DEFAULT_TIMER_TARGETS)[room.stage as TimerStage];
+  if (!t) return false;
+  return elapsedMs(room) > t.red * 60000;
+}
+
+/** Seconds left in a room's 2 minute turnover (0 when it is over or the room is not turning over). */
+export function turnoverMsLeft(room: Room): number {
+  if (room.stage !== "turnover") return 0;
+  return Math.max(0, TURNOVER_MS - elapsedMs(room));
+}
+
+/** Timer targets with any missing step filled in from the starting values. */
+export function mergeTimerTargets(t: Partial<TimerTargets> | null | undefined): TimerTargets {
+  const out = { ...DEFAULT_TIMER_TARGETS } as TimerTargets;
+  (Object.keys(out) as TimerStage[]).forEach((k) => {
+    const v = t?.[k];
+    if (v && Number.isFinite(Number(v.yellow)) && Number.isFinite(Number(v.red))) {
+      out[k] = { yellow: Number(v.yellow), red: Number(v.red) };
+    }
+  });
+  return out;
 }
 
 /**
@@ -55,6 +70,7 @@ export function isOverdue(room: Room): boolean {
 export function personColor(room: Room): string {
   if (room.contaminated) return LOCKOUT_COLOR;
   if (room.stage === "vacant") return VACANT_COLOR;
+  if (room.stage === "turnover") return VACANT_COLOR;
   if (room.stage === "needs_cleanup") return HOUSEKEEPING_COLOR;
   if (
     room.stage === "ready_for_nurse" ||
@@ -75,7 +91,8 @@ export function personLabel(
   room: Room,
   staffById: Record<string, { name: string }>
 ): string | null {
-  if (room.contaminated || room.stage === "vacant" || room.stage === "needs_cleanup") return null;
+  if (room.contaminated || room.stage === "vacant" || room.stage === "needs_cleanup" || room.stage === "turnover")
+    return null;
   if (
     room.stage === "ready_for_nurse" ||
     room.stage === "prepping" ||
@@ -90,8 +107,29 @@ export function personLabel(
     }
     return s ? `Nurse: ${s.name}` : "Nurse needed";
   }
-  const d = room.assigned_doctor_id ? staffById[room.assigned_doctor_id] : null;
-  return d ? `Doctor: ${d.name}` : "Doctor needed";
+  // The provider's name is shown separately (providerTag), so Doctor in room needs no extra label.
+  if (room.stage === "with_doctor") return null;
+  return "Doctor needed";
+}
+
+export interface ProviderTag {
+  name: string;
+  color: string;
+}
+
+/**
+ * The provider for this patient's visit, shown on the square and room page for the whole
+ * visit: the visit's own provider, or the room's usual provider when the visit has none,
+ * or "Any provider". Null when the room has no patient.
+ */
+export function providerTag(room: Room, staffById: Record<string, Staff>): ProviderTag | null {
+  if (room.contaminated || room.stage === "vacant" || room.stage === "turnover" || room.stage === "needs_cleanup") {
+    return null;
+  }
+  const id = room.visit_doctor_id ?? null;
+  const s = id ? staffById[id] : null;
+  if (!s) return { name: "Any provider", color: ANY_PROVIDER_COLOR };
+  return { name: s.name, color: s.name_color || ANY_PROVIDER_COLOR };
 }
 
 export interface AttentionItem {
@@ -113,7 +151,7 @@ export type FlashKind = "shots" | "support" | "message";
  * until a named person taps "I've got it".
  */
 export function attentionItems(room: Room): AttentionItem[] {
-  if (room.contaminated || room.stage === "vacant") return [];
+  if (room.contaminated || room.stage === "vacant" || room.stage === "turnover") return [];
   const claims = room.claims ?? {};
   const items: AttentionItem[] = [];
   if (room.stage === "shots")
@@ -137,7 +175,7 @@ export function attentionItems(room: Room): AttentionItem[] {
 
 /**
  * What a room is flashing for, or null. Priority when several are waiting:
- * contamination lockout (red), Shots (pink), tests and support (blue), message (orange).
+ * contamination lockout (red), Shots (pink), then tests, support and messages (yellow).
  * Each flash stops once its item has an "I've got it". Follow ups never flash.
  */
 export function flashKind(room: Room): "lockout" | FlashKind | null {
@@ -153,22 +191,21 @@ export function flashKind(room: Room): "lockout" | FlashKind | null {
 export const FLASH_CLASS: Record<"lockout" | FlashKind, string> = {
   lockout: "flash-urgent",
   shots: "flash-pink",
-  support: "flash-blue",
-  message: "flash-orange"
+  support: "flash-yellow",
+  message: "flash-yellow"
 };
 
 /** The solid color of a room's square on the Fishbowl board. */
 export function boxColor(room: Room): string {
   if (room.contaminated) return BOX_COLOR.lockout;
-  if (room.stage === "vacant") return BOX_COLOR.vacant;
+  if (room.stage === "vacant" || room.stage === "turnover") return BOX_COLOR.vacant;
   if (room.stage === "ready_for_doctor") return BOX_COLOR.readyForDoctor;
   return BOX_COLOR.occupied;
 }
 
 /**
  * The two colors a flashing square blinks between: its own color, and the flash color.
- * When the flash color is the same as the square (a blue test request on a blue square,
- * or a lockout on the red square) it blinks to white instead so it still shows.
+ * When the flash color is the same as the square (a lockout on the red square) it blinks to white instead so it still shows.
  */
 export function flashColors(room: Room, kind: "lockout" | FlashKind): [string, string] {
   const base = boxColor(room);
@@ -226,34 +263,12 @@ export function computeDoctorIdleTime(
 
 export type TimerColor = "normal" | "yellow" | "red";
 
-/**
- * The smart white/yellow/red rule: once a stage has at least
- * MIN_SAMPLES_FOR_AVG completed instances in the trailing window, compare
- * the room's current time in that stage against the clinic's own recent
- * average for it (20% over = yellow, 50% over = red). Until there's enough
- * history, fall back to the fixed THRESH_MIN minutes so a brand new clinic
- * still gets sensible coloring on day one.
- */
-export function timerColor(
-  stage: Stage,
-  elapsed: number,
-  avgByStage: Partial<Record<Stage, number>>,
-  countByStage: Partial<Record<Stage, number>>
-): TimerColor {
-  const avg = avgByStage[stage];
-  const count = countByStage[stage] ?? 0;
-
-  if (avg && count >= MIN_SAMPLES_FOR_AVG) {
-    if (elapsed >= avg * RED_OVER_AVG) return "red";
-    if (elapsed >= avg * YELLOW_OVER_AVG) return "yellow";
-    return "normal";
-  }
-
-  const fallbackMin = THRESH_MIN[stage];
-  if (!fallbackMin) return "normal";
-  const fallbackMs = fallbackMin * 60000;
-  if (elapsed >= fallbackMs * RED_OVER_AVG) return "red";
-  if (elapsed >= fallbackMs) return "yellow";
+/** Fixed rule: yellow after the step's yellow minutes, red after its red minutes (set in Admin). */
+export function timerColor(stage: Stage, elapsed: number, targets?: TimerTargets | null): TimerColor {
+  const t = (targets ?? DEFAULT_TIMER_TARGETS)[stage as TimerStage];
+  if (!t) return "normal";
+  if (elapsed >= t.red * 60000) return "red";
+  if (elapsed >= t.yellow * 60000) return "yellow";
   return "normal";
 }
 

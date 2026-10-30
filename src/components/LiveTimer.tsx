@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { formatDuration, timerColor } from "@/lib/util";
 import { Stage } from "@/lib/types";
+import { useClinic } from "@/lib/clinicContext";
 import { TIMER_VISIBLE_AFTER_MIN } from "@/lib/constants";
 
 const COLOR_CLASS: Record<string, string> = {
@@ -15,8 +16,6 @@ export function LiveTimer({
   startedAt,
   paused,
   stage,
-  avgByStage,
-  countByStage,
   yellowAfterMin,
   redAfterMin,
   minVisibleMin,
@@ -24,10 +23,8 @@ export function LiveTimer({
 }: {
   startedAt: string;
   paused?: boolean;
-  /** Pass stage + avgByStage/countByStage to enable the smart white/yellow/red coloring. */
+  /** Pass the stage to color the time by that step's yellow and red minutes (Admin, Timer colors). */
   stage?: Stage;
-  avgByStage?: Partial<Record<Stage, number>>;
-  countByStage?: Partial<Record<Stage, number>>;
   /** Fixed thresholds in minutes, for timers that are not a room stage (e.g. waiting on results). */
   yellowAfterMin?: number;
   redAfterMin?: number;
@@ -36,6 +33,7 @@ export function LiveTimer({
   /** Yellow and red times sit on a white pill so they stay readable on a colored background. */
   pill?: boolean;
 }) {
+  const { timerTargets } = useClinic();
   const [, setTick] = useState(0);
 
   useEffect(() => {
@@ -46,14 +44,14 @@ export function LiveTimer({
 
   if (paused) return <span>—</span>;
   // Nobody is waiting on an empty room, so a vacant room never shows a running time.
-  if (stage === "vacant") return <span />;
+  if (stage === "vacant" || stage === "turnover") return <span />;
 
   const ms = Date.now() - new Date(startedAt).getTime();
   const hideBefore = minVisibleMin ?? (stage ? TIMER_VISIBLE_AFTER_MIN : 0);
   if (ms < hideBefore * 60000) return <span />;
   let color: "normal" | "yellow" | "red" = "normal";
-  if (stage && avgByStage && countByStage) {
-    color = timerColor(stage, ms, avgByStage, countByStage);
+  if (stage) {
+    color = timerColor(stage, ms, timerTargets);
   } else if (redAfterMin !== undefined && ms >= redAfterMin * 60000) {
     color = "red";
   } else if (yellowAfterMin !== undefined && ms >= yellowAfterMin * 60000) {
