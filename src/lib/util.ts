@@ -115,6 +115,15 @@ export function personLabel(
 export interface ProviderTag {
   name: string;
   color: string;
+  /** Show on a near black tag instead of a white one. */
+  dark?: boolean;
+}
+
+/** staff.name_color is "#RRGGBB" (white tag) or "dark:#RRGGBB" (dark tag). */
+export function parseNameColor(v: string | null | undefined): { hex: string | null; dark: boolean } {
+  if (!v) return { hex: null, dark: false };
+  if (v.startsWith("dark:")) return { hex: v.slice(5) || null, dark: true };
+  return { hex: v, dark: false };
 }
 
 /**
@@ -129,7 +138,8 @@ export function providerTag(room: Room, staffById: Record<string, Staff>): Provi
   const id = room.visit_doctor_id ?? null;
   const s = id ? staffById[id] : null;
   if (!s) return { name: "Any provider", color: ANY_PROVIDER_COLOR };
-  return { name: s.name, color: s.name_color || ANY_PROVIDER_COLOR };
+  const { hex, dark } = parseNameColor(s.name_color);
+  return { name: s.name, color: hex || ANY_PROVIDER_COLOR, dark: !!hex && dark };
 }
 
 export interface AttentionItem {

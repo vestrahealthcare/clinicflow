@@ -1132,7 +1132,7 @@ update clinics set timer_targets = '{
 where timer_targets is null;
 
 -- ---- Provider name colors (only fills providers that have no color yet) -----------------
-update staff set name_color = '#15803D' where role = 'doctor' and name_color is null and lower(name) like '%choinard%';
+update staff set name_color = '#16A34A' where role = 'doctor' and name_color is null and lower(name) like '%choinard%';
 update staff set name_color = '#C2410C' where role = 'doctor' and name_color is null and lower(name) like '%curtsinger%';
 update staff set name_color = '#7E22CE' where role = 'doctor' and name_color is null and lower(name) like '%white%' and lower(name) like '%laura%';
 

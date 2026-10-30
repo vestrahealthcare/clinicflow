@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { Staff, StaffRole } from "@/lib/types";
-import { MAX_STAFF, ROLE_COLOR, NAME_COLORS } from "@/lib/constants";
+import { MAX_STAFF, ROLE_COLOR, NAME_COLORS, NAME_COLORS_DARK_TAG, DARK_TAG_BG, ANY_PROVIDER_COLOR } from "@/lib/constants";
+import { parseNameColor } from "@/lib/util";
+import { ProviderName } from "@/components/ProviderName";
 
 interface Props {
   staff: Staff[];
@@ -49,7 +51,7 @@ function RoleColumn({
             <div className="flex items-center gap-2">
               <input
                 className="flex-1 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 rounded-lg px-2.5 py-1.5 text-sm font-semibold"
-                style={role === "doctor" && p.name_color ? { color: p.name_color } : undefined}
+                style={role === "doctor" && parseNameColor(p.name_color).hex && !parseNameColor(p.name_color).dark ? { color: parseNameColor(p.name_color).hex! } : undefined}
                 defaultValue={p.name}
                 onBlur={(e) => {
                   const v = e.target.value.trim();
@@ -64,30 +66,58 @@ function RoleColumn({
                 ✕
               </button>
             </div>
-            {role === "doctor" && (
-              <div className="flex items-center gap-1.5 mt-1.5 mb-1 flex-wrap" aria-label={`Name color for ${p.name}`}>
-                <span className="text-xs text-slate-500 mr-0.5">Name color</span>
-                {NAME_COLORS.map((c) => (
-                  <button
-                    key={c.hex}
-                    title={c.name}
-                    aria-label={c.name}
-                    className={`w-6 h-6 rounded-full border-2 ${
-                      p.name_color?.toLowerCase() === c.hex.toLowerCase()
-                        ? "border-slate-900 dark:border-white scale-110"
-                        : "border-transparent"
-                    }`}
-                    style={{ backgroundColor: c.hex }}
-                    onClick={() => onColor(p.id, c.hex)}
-                  />
-                ))}
-                {p.name_color && (
-                  <button className="text-xs text-slate-400 underline ml-1" onClick={() => onColor(p.id, null)}>
-                    None
-                  </button>
-                )}
-              </div>
-            )}
+            {role === "doctor" && (() => {
+              const cur = parseNameColor(p.name_color);
+              const same = (a: string | null, b: string) => !!a && a.toLowerCase() === b.toLowerCase();
+              return (
+                <div className="mt-1.5 mb-2 space-y-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap" aria-label={`White tag colors for ${p.name}`}>
+                    <span className="text-xs text-slate-500 w-16 shrink-0">White tag</span>
+                    {NAME_COLORS.map((c) => (
+                      <button
+                        key={c.hex}
+                        title={c.name}
+                        aria-label={`${c.name} on a white tag`}
+                        className={`w-6 h-6 rounded-full border-2 ${
+                          !cur.dark && same(cur.hex, c.hex) ? "border-slate-900 dark:border-white scale-110" : "border-transparent"
+                        }`}
+                        style={{ backgroundColor: c.hex }}
+                        onClick={() => onColor(p.id, c.hex)}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap" aria-label={`Dark tag colors for ${p.name}`}>
+                    <span className="text-xs text-slate-500 w-16 shrink-0">Dark tag</span>
+                    {NAME_COLORS_DARK_TAG.map((c) => (
+                      <button
+                        key={c.hex}
+                        title={c.name}
+                        aria-label={`${c.name} on a dark tag`}
+                        className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${
+                          cur.dark && same(cur.hex, c.hex) ? "border-sky-500 scale-110" : "border-slate-500"
+                        }`}
+                        style={{ backgroundColor: DARK_TAG_BG }}
+                        onClick={() => onColor(p.id, `dark:${c.hex}`)}
+                      >
+                        <span className="w-3 h-3 rounded-full" style={{ backgroundColor: c.hex }} />
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500 w-16 shrink-0">Preview</span>
+                    <ProviderName
+                      tag={{ name: p.name, color: cur.hex || ANY_PROVIDER_COLOR, dark: !!cur.hex && cur.dark }}
+                      className="text-sm"
+                    />
+                    {p.name_color && (
+                      <button className="text-xs text-slate-400 underline" onClick={() => onColor(p.id, null)}>
+                        None
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         ))}
       </div>

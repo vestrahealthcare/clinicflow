@@ -104,15 +104,31 @@ export const FLASH_COLOR = {
   lockout: "#EF4444"
 } as const;
 
-// Provider name colors you can pick in Admin (Staff, next to each provider).
+// Provider name colors you can pick in Admin (Setup tab, next to each provider). Two looks:
+//   white tag: colored text on a white tag (these are the deeper colors, easy to read)
+//   dark tag: bright colored text on a near black tag (these pop the most on any square)
 export const NAME_COLORS: { name: string; hex: string }[] = [
-  { name: "Green", hex: "#15803D" },
-  { name: "Orange", hex: "#C2410C" },
+  { name: "Green", hex: "#16A34A" },
+  { name: "Deep green", hex: "#15803D" },
+  { name: "Emerald", hex: "#059669" },
+  { name: "Teal", hex: "#0D9488" },
+  { name: "Blue", hex: "#1D4ED8" },
   { name: "Purple", hex: "#7E22CE" },
-  { name: "Teal", hex: "#0F766E" },
   { name: "Pink", hex: "#BE185D" },
+  { name: "Orange", hex: "#C2410C" },
   { name: "Gray", hex: "#475569" }
 ];
+export const NAME_COLORS_DARK_TAG: { name: string; hex: string }[] = [
+  { name: "Bright green", hex: "#4ADE80" },
+  { name: "Bright teal", hex: "#2DD4BF" },
+  { name: "Bright cyan", hex: "#22D3EE" },
+  { name: "Bright blue", hex: "#60A5FA" },
+  { name: "Bright purple", hex: "#C084FC" },
+  { name: "Bright pink", hex: "#F472B6" },
+  { name: "Bright orange", hex: "#FB923C" },
+  { name: "Bright yellow", hex: "#FACC15" }
+];
+export const DARK_TAG_BG = "#0F172A";
 export const ANY_PROVIDER_COLOR = "#475569";
 
 // Swab and culture types counted in the Admin Tracker (counted at check out, only if still marked).

@@ -6,7 +6,7 @@ import { LiveTimer } from "@/components/LiveTimer";
 import { ClaimPicker } from "@/components/ClaimPicker";
 import { BlackStage } from "@/components/BlackStage";
 import { TurnoverCountdown } from "@/components/TurnoverCountdown";
-import { STAGE_LABEL, FOLLOWUP_TIMEFRAME_LABEL, FOLLOWUP_REASON_LABEL } from "@/lib/constants";
+import { STAGE_LABEL, FOLLOWUP_TIMEFRAME_LABEL, FOLLOWUP_REASON_LABEL, DARK_TAG_BG } from "@/lib/constants";
 import { providerTag, roomDirections } from "@/lib/util";
 
 export default function FrontDeskPage() {
@@ -262,7 +262,7 @@ export default function FrontDeskPage() {
                       <select
                         aria-label={`Provider for ${r.name}`}
                         className="border border-slate-200 bg-slate-50 rounded-md text-sm px-2 py-1 font-bold"
-                        style={{ color: tag.color }}
+                        style={{ color: tag.color, ...(tag.dark ? { backgroundColor: DARK_TAG_BG } : null) }}
                         value={r.visit_doctor_id ?? ""}
                         onChange={async (e) => {
                           setMoveError(null);
