@@ -188,8 +188,9 @@ export const REQUEST_LABEL: Record<string, string> = Object.fromEntries(
 // until a room has been in its step 5 minutes.
 export const TIMER_VISIBLE_AFTER_MIN = 0;
 
-export const FOLLOWUP_TIMEFRAMES: { key: "1_week" | "3_months" | "6_months" | "other"; label: string }[] = [
+export const FOLLOWUP_TIMEFRAMES: { key: "1_week" | "2_months" | "3_months" | "6_months" | "other"; label: string }[] = [
   { key: "1_week", label: "1 week" },
+  { key: "2_months", label: "2 months" },
   { key: "3_months", label: "3 months" },
   { key: "6_months", label: "6 months" },
   { key: "other", label: "Other" }
@@ -207,6 +208,12 @@ export const FOLLOWUP_TIMEFRAME_LABEL: Record<string, string> = Object.fromEntri
 export const FOLLOWUP_REASON_LABEL: Record<string, string> = Object.fromEntries(
   FOLLOWUP_REASONS.map((r) => [r.key, r.label])
 );
+/** Labels for the three things sent to the front desk. */
+export const FRONTDESK_KIND_LABEL: Record<"followup" | "school_note" | "fd_other", string> = {
+  followup: "Follow up (f/u)",
+  school_note: "School note",
+  fd_other: "Other"
+};
 // Tests whose results may still be pending when the patient leaves. If any of
 // these are still marked on the room at "Pt departed", the room asks whether to
 // add the patient to the "Call with results" list.

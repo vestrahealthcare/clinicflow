@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 import { ClinicProvider, useClinic } from "@/lib/clinicContext";
 import { WhoAmI } from "@/components/WhoAmI";
 import { SyncStatus } from "@/components/SyncStatus";
+import { TestBanner } from "@/components/TestBanner";
+import { isTestSlug } from "@/lib/testMode";
 
 function TopNav({ slug }: { slug: string }) {
   const { clinic, followups } = useClinic();
@@ -22,6 +24,9 @@ function TopNav({ slug }: { slug: string }) {
       <div className="flex items-baseline gap-2">
         <span className="font-bold text-lg">ClinicFlow</span>
         <span className="text-sm text-slate-500">{clinic?.name ?? slug}</span>
+        {isTestSlug(slug) && (
+          <span className="text-xs font-extrabold px-2 py-0.5 rounded-full bg-fuchsia-700 text-white">TEST MODE</span>
+        )}
       </div>
       <nav className="flex bg-slate-100 dark:bg-slate-900 rounded-lg p-1 gap-0.5 flex-wrap">
         {tabs.map((t) => (
@@ -60,6 +65,7 @@ function ClinicShell({ slug, children }: { slug: string; children: React.ReactNo
   if (error) return <div className="p-10 text-red-600">{error}</div>;
   return (
     <div className="min-h-full flex flex-col">
+      <TestBanner />
       <TopNav slug={slug} />
       <main className={`flex-1 p-5 w-full mx-auto ${wide ? "max-w-none" : "max-w-6xl"}`}>{children}</main>
     </div>

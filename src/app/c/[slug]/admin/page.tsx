@@ -6,6 +6,7 @@ import { LiveTimer } from "@/components/LiveTimer";
 import { StaffRoster } from "@/components/StaffRoster";
 import { TrackerPanel } from "@/components/TrackerPanel";
 import { TimerColorsCard } from "@/components/TimerColorsCard";
+import { TestModeCard } from "@/components/TestModeCard";
 import { STAGE_LABEL } from "@/lib/constants";
 import { formatMinutes, isOverdue, computeDoctorIdleTime } from "@/lib/util";
 import { Stage } from "@/lib/types";
@@ -272,6 +273,8 @@ export default function AdminPage() {
           <TimerColorsCard />
 
           <ResetDayCard onReset={actions.resetDay} />
+
+          <TestModeCard />
 
           <AveragesCard
             resetAt={clinic.averages_reset_at}

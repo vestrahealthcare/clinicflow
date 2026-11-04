@@ -21,6 +21,7 @@ supabase/update_2026_10_27.sql
 supabase/update_2026_10_27b.sql
 supabase/update_2026_10_28.sql
 supabase/update_2026_10_30.sql
+supabase/update_2026_11_02.sql   (update 5: Test mode; run after update 4)
                           (the latest, "update 4". It includes everything in
                           update 3, so it is safe whether or not update 3 ran). Upgrades for a project that already ran an older
                           schema.sql. Run them in order in the SQL editor,
@@ -218,6 +219,17 @@ uses the same ones. Averages no longer change the colors.
   board also reloads the whole page every 5 minutes as a safety net. Set the
   big screen computer to never sleep.
 
+## Test mode
+
+Admin, Setup tab, "Open test mode" opens a separate practice copy of the clinic
+(slug `red-berry-test`) with the same room names, staff, directions and timer
+colors. It has its own rooms, ticket numbers, lab list and Tracker, so nothing
+done there can reach the live clinic. A purple bar shows on every screen while
+in test mode. "Reset test data" throws the practice data away and recopies the
+current live rooms, staff and settings. "Exit test mode" returns to the live
+Admin page. Test mode is a URL, so any tablet that opens it stays there until
+it exits. Needs `supabase/update_2026_11_02.sql` (run after update 4).
+
 ## If the home page says "No clinics yet" or shows a permission error
 
 Supabase projects created after May 30, 2026 do not expose new tables to the
@@ -255,3 +267,14 @@ grant execute on all functions in schema public to anon, authenticated, service_
   Kiosk Browser (free) pointed at the tablet's URL, with "Ask before wake"
   and "Auto return to Kiosk" enabled, is the standard approach. Happy to
   write the exact settings once the hardware is confirmed.
+
+
+## Send to front desk (update 6)
+
+On the room page, the old "Follow up visit" area is now "Send to front desk" with three items:
+Follow up (f/u), School note and Other. Follow up has a 2 months choice (1 week, 2 months, 3 months,
+6 months, Other). School note and Other are free text (up to 300 characters). A room can send any
+combination. Each item has its own "I've got it" on the room page and again in the waiting room list on
+the Front desk tab after check out. Pt departed asks for confirmation if any item is still not picked up.
+
+Run supabase/update_2026_11_04.sql (after update 4) before deploying this version.

@@ -90,7 +90,7 @@ export interface Room {
   /** Who tapped "I've got it", keyed by request key, "note", "shots" or "followup". */
   claims: Record<string, string>;
   /** Follow up requested from the room, moves to the check-out list at check-out. */
-  followup: { timeframe: FollowupTimeframe; reason: FollowupReason; note?: string } | null;
+  followup: RoomFollowup | null;
   /** The nurse who tapped Start prep, shown while the room is in Prepping. */
   prep_by?: string | null;
   /** The provider for this patient's visit (can differ from the room's usual provider). */
@@ -102,7 +102,22 @@ export interface Room {
   updated_at: string;
 }
 
-export type FollowupTimeframe = "1_week" | "3_months" | "6_months" | "other";
+export type FollowupTimeframe = "1_week" | "2_months" | "3_months" | "6_months" | "other";
+
+/**
+ * Everything a room has sent to the front desk (rooms.followup). Each part is optional:
+ * the follow up is timeframe + reason (+ note), the school note and Other are free text.
+ */
+export interface RoomFollowup {
+  timeframe?: FollowupTimeframe;
+  reason?: FollowupReason;
+  note?: string;
+  school_note?: string;
+  fd_other?: string;
+}
+
+/** The three things a room can send to the front desk. */
+export type FrontDeskKind = "followup" | "school_note" | "fd_other";
 export type FollowupReason = "weight_check" | "asthma" | "medication_fu" | "wcc" | "generic";
 
 /** A patient who checked out and is back in the waiting room until "Pt departed". */
@@ -116,6 +131,10 @@ export interface Checkout {
   followup_reason: FollowupReason | null;
   followup_note: string | null;
   followup_claimed_by: string | null;
+  school_note?: string | null;
+  school_note_claimed_by?: string | null;
+  fd_other?: string | null;
+  fd_other_claimed_by?: string | null;
   checked_out_at: string;
   departed_at: string | null;
 }

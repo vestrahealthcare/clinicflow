@@ -20,9 +20,10 @@ import {
   FOLLOWUP_TIMEFRAMES,
   FOLLOWUP_REASONS,
   FOLLOWUP_TIMEFRAME_LABEL,
-  FOLLOWUP_REASON_LABEL
+  FOLLOWUP_REASON_LABEL,
+  FRONTDESK_KIND_LABEL
 } from "@/lib/constants";
-import { FollowupReason, FollowupTimeframe } from "@/lib/types";
+import { FollowupReason, FollowupTimeframe, FrontDeskKind } from "@/lib/types";
 import {
   attentionItems,
   flashKind,
@@ -41,7 +42,9 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
   const [askCallbackFor, setAskCallbackFor] = useState<string | null>(null);
   // Which "I've got it" item is picking a name, and the follow up form.
   const [claiming, setClaiming] = useState<string | null>(null);
-  const [followupOpenFor, setFollowupOpenFor] = useState<string | null>(null);
+  // Which "Send to front desk" form is open: the room and which of the three items.
+  const [fdOpen, setFdOpen] = useState<{ roomId: string; kind: FrontDeskKind } | null>(null);
+  const [fdText, setFdText] = useState("");
   const [fuTimeframe, setFuTimeframe] = useState<FollowupTimeframe | null>(null);
   const [fuReason, setFuReason] = useState<FollowupReason | null>(null);
   const [fuNote, setFuNote] = useState("");
@@ -130,16 +133,30 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
     actions.advanceStage(room.id, { expected: "ready_for_nurse", actor: name });
   };
 
-  const openFollowup = () => {
-    setFuTimeframe(room.followup?.timeframe ?? null);
-    setFuReason(room.followup?.reason ?? null);
-    setFuNote(room.followup?.note ?? "");
-    setFollowupOpenFor(room.id);
+  const openFrontDesk = (kind: FrontDeskKind) => {
+    if (kind === "followup") {
+      setFuTimeframe(room.followup?.timeframe ?? null);
+      setFuReason(room.followup?.reason ?? null);
+      setFuNote(room.followup?.note ?? "");
+    } else {
+      setFdText(room.followup?.[kind] ?? "");
+    }
+    setFdOpen({ roomId: room.id, kind });
   };
-  const saveFollowup = () => {
-    if (!fuTimeframe || !fuReason) return;
-    actions.setFollowup(room.id, fuTimeframe, fuReason, fuNote);
-    setFollowupOpenFor(null);
+  const saveFrontDesk = () => {
+    if (!fdOpen) return;
+    if (fdOpen.kind === "followup") {
+      if (!fuTimeframe || !fuReason) return;
+      actions.setFollowup(room.id, fuTimeframe, fuReason, fuNote);
+    } else {
+      if (!fdText.trim()) return;
+      actions.setFrontDeskText(room.id, fdOpen.kind, fdText);
+    }
+    setFdOpen(null);
+  };
+  const removeFrontDesk = (kind: FrontDeskKind) => {
+    if (kind === "followup") actions.setFollowup(room.id, null, null);
+    else actions.setFrontDeskText(room.id, kind, "");
   };
 
   return (
@@ -472,80 +489,153 @@ export default function RoomPage({ params }: { params: { slug: string; roomNumbe
 
             {occupied && (
               <>
-                <div className="text-xs text-slate-500 mt-5 mb-2">Follow up visit</div>
-                {followupOpenFor === room.id ? (
-                  <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3">
-                    <div className="text-xs text-slate-500 mb-2">When</div>
-                    <div className="flex flex-wrap gap-2 mb-3">
-                      {FOLLOWUP_TIMEFRAMES.map((t) => (
-                        <button
-                          key={t.key}
-                          className={`chip ${fuTimeframe === t.key ? "on" : ""}`}
-                          onClick={() => setFuTimeframe(t.key)}
-                        >
-                          {t.label}
-                        </button>
-                      ))}
+                <div className="text-xs text-slate-500 mt-5 mb-2">Send to front desk</div>
+                {(() => {
+                  const fu = room.followup;
+                  const sent: { kind: FrontDeskKind; text: string; detail?: string }[] = [];
+                  if (fu?.timeframe && fu?.reason)
+                    sent.push({
+                      kind: "followup",
+                      text: `${FOLLOWUP_TIMEFRAME_LABEL[fu.timeframe]}, ${FOLLOWUP_REASON_LABEL[fu.reason]}`,
+                      detail: fu.note
+                    });
+                  if (fu?.school_note) sent.push({ kind: "school_note", text: fu.school_note });
+                  if (fu?.fd_other) sent.push({ kind: "fd_other", text: fu.fd_other });
+                  const isSent = (k: FrontDeskKind) => sent.some((x) => x.kind === k);
+                  const open = fdOpen && fdOpen.roomId === room.id ? fdOpen.kind : null;
+                  return (
+                    <div className="space-y-2">
+                      {sent.map((x) =>
+                        open === x.kind ? null : (
+                          <div
+                            key={x.kind}
+                            className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2 text-sm"
+                          >
+                            <span className="font-semibold min-w-0">
+                              <span className="block text-xs font-normal text-slate-500">{FRONTDESK_KIND_LABEL[x.kind]}</span>
+                              <span className="break-words">{x.text}</span>
+                              {x.detail && <span className="block font-normal text-slate-500 break-words">{x.detail}</span>}
+                            </span>
+                            <span className="flex gap-3 shrink-0">
+                              <button className="text-slate-500" onClick={() => openFrontDesk(x.kind)}>
+                                Change
+                              </button>
+                              <button className="text-slate-500" onClick={() => removeFrontDesk(x.kind)}>
+                                Remove
+                              </button>
+                            </span>
+                          </div>
+                        )
+                      )}
+
+                      {open === "followup" && (
+                        <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+                          <div className="text-sm font-bold mb-2">{FRONTDESK_KIND_LABEL.followup}</div>
+                          <div className="text-xs text-slate-500 mb-2">When</div>
+                          <div className="flex flex-wrap gap-2 mb-3">
+                            {FOLLOWUP_TIMEFRAMES.map((t) => (
+                              <button
+                                key={t.key}
+                                className={`chip ${fuTimeframe === t.key ? "on" : ""}`}
+                                onClick={() => setFuTimeframe(t.key)}
+                              >
+                                {t.label}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="text-xs text-slate-500 mb-2">Reason</div>
+                          <div className="flex flex-wrap gap-2 mb-3">
+                            {FOLLOWUP_REASONS.map((r) => (
+                              <button
+                                key={r.key}
+                                className={`chip ${fuReason === r.key ? "on" : ""}`}
+                                onClick={() => setFuReason(r.key)}
+                              >
+                                {r.label}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="text-xs text-slate-500 mb-2">Note for the front desk (optional)</div>
+                          <input
+                            className="w-full border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900 mb-3"
+                            placeholder="e.g. needs a morning slot, bring shot record"
+                            maxLength={300}
+                            value={fuNote}
+                            onChange={(e) => setFuNote(e.target.value)}
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white font-bold text-sm disabled:opacity-40"
+                              disabled={!fuTimeframe || !fuReason}
+                              onClick={saveFrontDesk}
+                            >
+                              Send to front desk
+                            </button>
+                            <button
+                              className="px-4 py-2.5 rounded-lg border border-slate-300 dark:border-slate-600 text-sm"
+                              onClick={() => setFdOpen(null)}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {(open === "school_note" || open === "fd_other") && (
+                        <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+                          <div className="text-sm font-bold mb-2">{FRONTDESK_KIND_LABEL[open]}</div>
+                          <div className="text-xs text-slate-500 mb-2">
+                            {open === "school_note"
+                              ? "How long is the school note for?"
+                              : "What does the front desk need to do? (printouts, forms, anything else)"}
+                          </div>
+                          <input
+                            className="w-full border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900 mb-3"
+                            placeholder={open === "school_note" ? "e.g. 3 days, or out through Friday" : "e.g. print the shot record"}
+                            maxLength={300}
+                            autoFocus
+                            value={fdText}
+                            onChange={(e) => setFdText(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") saveFrontDesk();
+                            }}
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white font-bold text-sm disabled:opacity-40"
+                              disabled={!fdText.trim()}
+                              onClick={saveFrontDesk}
+                            >
+                              Send to front desk
+                            </button>
+                            <button
+                              className="px-4 py-2.5 rounded-lg border border-slate-300 dark:border-slate-600 text-sm"
+                              onClick={() => setFdOpen(null)}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {!open && (
+                        <div className="flex gap-2">
+                          {(["followup", "school_note", "fd_other"] as FrontDeskKind[])
+                            .filter((k) => !isSent(k))
+                            .map((k) => (
+                              <button
+                                key={k}
+                                className="flex-1 py-3 rounded-xl border border-blue-600 text-blue-700 dark:text-blue-300 font-bold text-sm"
+                                onClick={() => openFrontDesk(k)}
+                              >
+                                {FRONTDESK_KIND_LABEL[k]}
+                              </button>
+                            ))}
+                        </div>
+                      )}
                     </div>
-                    <div className="text-xs text-slate-500 mb-2">Reason</div>
-                    <div className="flex flex-wrap gap-2 mb-3">
-                      {FOLLOWUP_REASONS.map((r) => (
-                        <button
-                          key={r.key}
-                          className={`chip ${fuReason === r.key ? "on" : ""}`}
-                          onClick={() => setFuReason(r.key)}
-                        >
-                          {r.label}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="text-xs text-slate-500 mb-2">Note for the front desk (optional)</div>
-                    <input
-                      className="w-full border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm bg-slate-50 dark:bg-slate-900 mb-3"
-                      placeholder="e.g. needs a morning slot, bring shot record"
-                      maxLength={300}
-                      value={fuNote}
-                      onChange={(e) => setFuNote(e.target.value)}
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white font-bold text-sm disabled:opacity-40"
-                        disabled={!fuTimeframe || !fuReason}
-                        onClick={saveFollowup}
-                      >
-                        Send to front desk
-                      </button>
-                      <button
-                        className="px-4 py-2.5 rounded-lg border border-slate-300 dark:border-slate-600 text-sm"
-                        onClick={() => setFollowupOpenFor(null)}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : room.followup ? (
-                  <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2 text-sm">
-                    <span className="font-semibold">
-                      {FOLLOWUP_TIMEFRAME_LABEL[room.followup.timeframe]}, {FOLLOWUP_REASON_LABEL[room.followup.reason]}
-                      {room.followup.note && <span className="block font-normal text-slate-500">{room.followup.note}</span>}
-                    </span>
-                    <span className="flex gap-3">
-                      <button className="text-slate-500" onClick={openFollowup}>
-                        Change
-                      </button>
-                      <button className="text-slate-500" onClick={() => actions.setFollowup(room.id, null, null)}>
-                        Remove
-                      </button>
-                    </span>
-                  </div>
-                ) : (
-                  <button
-                    className="w-full py-3 rounded-xl border border-blue-600 text-blue-700 dark:text-blue-300 font-bold text-sm"
-                    onClick={openFollowup}
-                  >
-                    Schedule a follow up visit
-                  </button>
-                )}
+                  );
+                })()}
               </>
             )}
 

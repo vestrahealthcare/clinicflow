@@ -143,7 +143,7 @@ export function providerTag(room: Room, staffById: Record<string, Staff>): Provi
 }
 
 export interface AttentionItem {
-  /** Key used for "I've got it": a request key, "note", "shots" or "followup". */
+  /** Key used for "I've got it": a request key, "note", "shots", "followup", "school_note" or "fd_other". */
   key: string;
   label: string;
   claimedBy: string | null;
@@ -169,15 +169,22 @@ export function attentionItems(room: Room): AttentionItem[] {
   ALL_REQUEST_KEYS.filter((k) => room.requests?.[k]).forEach((k) =>
     items.push({ key: k, label: REQUEST_LABEL[k] ?? k, claimedBy: claims[k] ?? null, flash: "support" })
   );
-  if (room.followup) {
+  const fu = room.followup;
+  if (fu?.timeframe && fu?.reason) {
     items.push({
       key: "followup",
-      label: `Schedule follow up: ${FOLLOWUP_TIMEFRAME_LABEL[room.followup.timeframe] ?? room.followup.timeframe}, ${
-        FOLLOWUP_REASON_LABEL[room.followup.reason] ?? room.followup.reason
+      label: `Schedule follow up: ${FOLLOWUP_TIMEFRAME_LABEL[fu.timeframe] ?? fu.timeframe}, ${
+        FOLLOWUP_REASON_LABEL[fu.reason] ?? fu.reason
       }`,
       claimedBy: claims.followup ?? null,
-      detail: room.followup.note || undefined
+      detail: fu.note || undefined
     });
+  }
+  if (fu?.school_note) {
+    items.push({ key: "school_note", label: "School note", claimedBy: claims.school_note ?? null, detail: fu.school_note });
+  }
+  if (fu?.fd_other) {
+    items.push({ key: "fd_other", label: "Other for front desk", claimedBy: claims.fd_other ?? null, detail: fu.fd_other });
   }
   if (room.note) items.push({ key: "note", label: "Message", claimedBy: claims.note ?? null, flash: "message" });
   return items;

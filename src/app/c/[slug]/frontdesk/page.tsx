@@ -8,12 +8,13 @@ import { BlackStage } from "@/components/BlackStage";
 import { TurnoverCountdown } from "@/components/TurnoverCountdown";
 import { STAGE_LABEL, FOLLOWUP_TIMEFRAME_LABEL, FOLLOWUP_REASON_LABEL, DARK_TAG_BG } from "@/lib/constants";
 import { providerTag, roomDirections } from "@/lib/util";
+import { FrontDeskKind } from "@/lib/types";
 
 export default function FrontDeskPage() {
   const { rooms, hallways, staff, staffById, checkouts, actions, me } = useClinic();
   const [lastAssigned, setLastAssigned] = useState<{ roomId: string; ticket: string; initials: string } | null>(null);
   const [initials, setInitials] = useState("");
-  const [claimingCheckout, setClaimingCheckout] = useState<string | null>(null);
+  const [claimingCheckout, setClaimingCheckout] = useState<{ id: string; kind: FrontDeskKind } | null>(null);
   const [confirmDepart, setConfirmDepart] = useState<string | null>(null);
   const [checkInError, setCheckInError] = useState<string | null>(null);
   // Change room: the occupied room whose patient is being moved, and any error from the move.
@@ -150,51 +151,37 @@ export default function FrontDeskPage() {
       <div className="card p-5 mb-6">
         <h3 className="font-bold mb-1">Checked out, in the waiting room</h3>
         <p className="text-sm text-slate-500 mb-3">
-          Follow up visits requested in the room show here. Tap Pt departed when the patient has left.
+          Follow ups, school notes and other items sent from the room show here. Tap Pt departed when the patient has left.
         </p>
         {checkouts.length === 0 ? (
           <div className="text-sm text-slate-400">Nobody checked out right now.</div>
         ) : (
           <div className="space-y-2">
             {checkouts.map((c) => {
-              const hasFollowup = !!c.followup_timeframe && !!c.followup_reason;
+              const items: { kind: FrontDeskKind; label: string; text: string; detail?: string | null; by: string | null }[] = [];
+              if (c.followup_timeframe && c.followup_reason)
+                items.push({
+                  kind: "followup",
+                  label: "Schedule follow up",
+                  text: `${FOLLOWUP_TIMEFRAME_LABEL[c.followup_timeframe]}, ${FOLLOWUP_REASON_LABEL[c.followup_reason]}`,
+                  detail: c.followup_note,
+                  by: c.followup_claimed_by
+                });
+              if (c.school_note)
+                items.push({ kind: "school_note", label: "School note", text: c.school_note, by: c.school_note_claimed_by ?? null });
+              if (c.fd_other)
+                items.push({ kind: "fd_other", label: "Other", text: c.fd_other, by: c.fd_other_claimed_by ?? null });
+              const unclaimed = items.filter((i) => !i.by).length;
               return (
                 <div key={c.id} className="rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-3">
                   <div className="flex flex-wrap items-center gap-3">
                     <span className="font-mono text-lg font-semibold w-16">{c.initials ?? "—"}</span>
-                    <span className="text-sm text-slate-500 flex-1 min-w-[8rem]">
-                      from {c.room_name ?? "a room"}
-                      {hasFollowup && (
-                        <span className="block font-semibold text-slate-800 dark:text-slate-100">
-                          Schedule follow up: {FOLLOWUP_TIMEFRAME_LABEL[c.followup_timeframe!]},{" "}
-                          {FOLLOWUP_REASON_LABEL[c.followup_reason!]}
-                          {c.followup_note && (
-                            <span className="block font-normal text-slate-500">{c.followup_note}</span>
-                          )}
-                        </span>
-                      )}
-                    </span>
-                    {hasFollowup &&
-                      (c.followup_claimed_by ? (
-                        <span className="flex items-center gap-2 text-sm">
-                          <span className="text-emerald-700 dark:text-emerald-400 font-semibold">
-                            {c.followup_claimed_by} has it
-                          </span>
-                          <button className="text-xs text-slate-400" onClick={() => actions.claimCheckoutFollowup(c.id, "")}>
-                            Undo
-                          </button>
-                        </span>
-                      ) : (
-                        <button
-                          className="px-3 py-2 rounded-lg bg-emerald-600 text-white font-semibold text-sm"
-                          onClick={() => (me ? actions.claimCheckoutFollowup(c.id, me) : setClaimingCheckout(c.id))}
-                        >
-                          I&apos;ve got it
-                        </button>
-                      ))}
+                    <span className="text-sm text-slate-500 flex-1 min-w-[8rem]">from {c.room_name ?? "a room"}</span>
                     {confirmDepart === c.id ? (
                       <span className="text-sm flex items-center gap-2">
-                        <span className="text-amber-600 font-semibold">Follow up not picked up yet.</span>
+                        <span className="text-amber-600 font-semibold">
+                          {unclaimed === 1 ? "1 item not picked up yet." : `${unclaimed} items not picked up yet.`}
+                        </span>
                         <button
                           className="px-3 py-2 rounded-lg bg-blue-600 text-white font-semibold"
                           onClick={() => {
@@ -211,18 +198,49 @@ export default function FrontDeskPage() {
                     ) : (
                       <button
                         className="px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold text-sm"
-                        onClick={() =>
-                          hasFollowup && !c.followup_claimed_by ? setConfirmDepart(c.id) : actions.departCheckout(c.id)
-                        }
+                        onClick={() => (unclaimed > 0 ? setConfirmDepart(c.id) : actions.departCheckout(c.id))}
                       >
                         Pt departed
                       </button>
                     )}
                   </div>
-                  {claimingCheckout === c.id && (
+                  {items.length > 0 && (
+                    <div className="mt-2 space-y-2">
+                      {items.map((it) => (
+                        <div
+                          key={it.kind}
+                          className="flex flex-wrap items-center gap-3 rounded-lg bg-slate-50 dark:bg-slate-900 px-3 py-2"
+                        >
+                          <span className="flex-1 min-w-[8rem] text-sm font-semibold text-slate-800 dark:text-slate-100">
+                            <span className="block text-xs font-normal text-slate-500">{it.label}</span>
+                            <span className="break-words">{it.text}</span>
+                            {it.detail && <span className="block font-normal text-slate-500 break-words">{it.detail}</span>}
+                          </span>
+                          {it.by ? (
+                            <span className="flex items-center gap-2 text-sm">
+                              <span className="text-emerald-700 dark:text-emerald-400 font-semibold">{it.by} has it</span>
+                              <button className="text-xs text-slate-400" onClick={() => actions.claimCheckoutItem(c.id, it.kind, "")}>
+                                Undo
+                              </button>
+                            </span>
+                          ) : (
+                            <button
+                              className="px-3 py-2 rounded-lg bg-emerald-600 text-white font-semibold text-sm"
+                              onClick={() =>
+                                me ? actions.claimCheckoutItem(c.id, it.kind, me) : setClaimingCheckout({ id: c.id, kind: it.kind })
+                              }
+                            >
+                              I&apos;ve got it
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {claimingCheckout?.id === c.id && (
                     <ClaimPicker
                       onPick={(name) => {
-                        actions.claimCheckoutFollowup(c.id, name);
+                        actions.claimCheckoutItem(c.id, claimingCheckout.kind, name);
                         setClaimingCheckout(null);
                       }}
                       onCancel={() => setClaimingCheckout(null)}

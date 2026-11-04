@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import { Clinic } from "@/lib/types";
+import { isTestSlug } from "@/lib/testMode";
 
 export default function Home() {
   const [clinics, setClinics] = useState<Clinic[]>([]);
@@ -16,7 +17,8 @@ export default function Home() {
       .order("name")
       .then(({ data, error }) => {
         if (error) setLoadError(error.message);
-        setClinics((data as Clinic[]) ?? []);
+        // Test mode practice copies are reached from Admin, not listed here.
+        setClinics(((data as Clinic[]) ?? []).filter((c) => !isTestSlug(c.slug)));
       });
   }, []);
 

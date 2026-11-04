@@ -18,6 +18,7 @@ import {
   Checkout,
   FollowupTimeframe,
   FollowupReason,
+  FrontDeskKind,
   TimerTargets,
   TrackerData
 } from "./types";
@@ -104,6 +105,8 @@ interface ClinicActions {
     reason: FollowupReason | null,
     note?: string
   ) => Promise<void>;
+  /** School note or Other (free text) for the front desk; empty text removes it. */
+  setFrontDeskText: (roomId: string, kind: "school_note" | "fd_other", text: string) => Promise<void>;
   /** Free text results typed on a Call with results task. */
   setCallbackNote: (callbackId: string, note: string) => Promise<void>;
   /** Go back one step in the room (timer resumes from the earlier step's original start). Returns an error or null. */
@@ -131,6 +134,8 @@ interface ClinicActions {
   /** "I've got it": pass the person's name, or an empty name to undo. */
   claim: (roomId: string, key: string, name: string) => Promise<void>;
   claimCheckoutFollowup: (checkoutId: string, name: string) => Promise<void>;
+  /** "I've got it" on one front desk item of a checked out patient (empty name undoes it). */
+  claimCheckoutItem: (checkoutId: string, kind: FrontDeskKind, name: string) => Promise<void>;
   departCheckout: (checkoutId: string) => Promise<void>;
   setDirections: (roomId: string, text: string) => Promise<void>;
   setSampleBoxed: (sampleId: string, boxed: boolean) => Promise<void>;
@@ -538,6 +543,10 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
     []
   );
 
+  const setFrontDeskText = useCallback(async (roomId: string, kind: "school_note" | "fd_other", text: string) => {
+    await supabase.rpc("set_fd_text", { p_room_id: roomId, p_kind: kind, p_text: text });
+  }, []);
+
   const setCallbackNote = useCallback(
     async (callbackId: string, note: string) => {
       await supabase.rpc("set_callback_note", { p_callback_id: callbackId, p_note: note });
@@ -649,6 +658,14 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
   const claim = useCallback(async (roomId: string, key: string, name: string) => {
     await supabase.rpc("claim_request", { p_room_id: roomId, p_key: key, p_name: name });
   }, []);
+
+  const claimCheckoutItem = useCallback(
+    async (checkoutId: string, kind: FrontDeskKind, name: string) => {
+      await supabase.rpc("claim_checkout_item", { p_checkout_id: checkoutId, p_kind: kind, p_name: name });
+      refreshFollowups();
+    },
+    [refreshFollowups]
+  );
 
   const claimCheckoutFollowup = useCallback(
     async (checkoutId: string, name: string) => {
@@ -862,6 +879,7 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
       setStaffColor,
       refresh: refreshAll,
       setFollowup,
+      setFrontDeskText,
       setCallbackNote,
       swapRoom,
       resetAverages,
@@ -869,6 +887,7 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
       resetDay,
       claim,
       claimCheckoutFollowup,
+      claimCheckoutItem,
       departCheckout,
       setDirections,
       setSampleBoxed,
