@@ -231,6 +231,21 @@ export interface TrackerRow {
   sw_viral_panel: number;
 }
 
+/** One row of the per nurse or MA table: a day, a nurse, patients prepped and prep time totals. */
+export interface NurseRow {
+  visit_date: string;
+  nurse_name: string | null;
+  after_reset: boolean;
+  preps: number;
+  prep_sum: number | null;
+  prep_n: number;
+}
+
+export interface NurseTrackerData {
+  reset_at: string | null;
+  rows: NurseRow[];
+}
+
 export interface TrackerData {
   reset_at: string | null;
   rows: TrackerRow[];

@@ -217,6 +217,7 @@ export function boxColor(room: Room): string {
   if (room.contaminated) return BOX_COLOR.lockout;
   if (room.stage === "vacant" || room.stage === "turnover") return BOX_COLOR.vacant;
   if (room.stage === "ready_for_doctor") return BOX_COLOR.readyForDoctor;
+  if (room.stage === "with_doctor") return BOX_COLOR.providerInRoom;
   return BOX_COLOR.occupied;
 }
 

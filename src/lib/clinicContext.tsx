@@ -20,7 +20,8 @@ import {
   FollowupReason,
   FrontDeskKind,
   TimerTargets,
-  TrackerData
+  TrackerData,
+  NurseTrackerData
 } from "./types";
 import { clinicToday, dateKeyInTz, mergeTimerTargets } from "./util";
 import { MAX_STAFF, ROLE_COLOR, TURNOVER_MS } from "./constants";
@@ -119,6 +120,8 @@ interface ClinicActions {
   setTimerTargets: (targets: TimerTargets) => Promise<string | null>;
   /** The Admin Tracker numbers for a date (YYYY-MM-DD) and everything before it. */
   getTrackerData: (day: string) => Promise<{ data: TrackerData | null; error: string | null }>;
+  /** Per nurse or MA numbers (patients prepped, prep time) for a date and everything before it. */
+  getNurseTrackerData: (day: string) => Promise<{ data: NurseTrackerData | null; error: string | null }>;
   /** Pick the color of a provider's name (hex), or null to clear. */
   setStaffColor: (staffId: string, color: string | null) => Promise<void>;
   /** Fetch rooms, staff, settings and lists again right now. */
@@ -610,6 +613,23 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
     [clinic]
   );
 
+  const getNurseTrackerData = useCallback(
+    async (day: string) => {
+      if (!clinic) return { data: null, error: "No clinic loaded." };
+      const { data, error: rpcErr } = await supabase.rpc("tracker_nurse_data", { p_clinic_id: clinic.id, p_day: day });
+      if (rpcErr) {
+        return {
+          data: null,
+          error: missingFunction(rpcErr, "tracker_nurse_data")
+            ? "The per nurse table needs the database update. Run clinicflow-update-7-2026-11-13.sql in the Supabase SQL Editor, then reload."
+            : rpcErr.message
+        };
+      }
+      return { data: data as NurseTrackerData, error: null };
+    },
+    [clinic]
+  );
+
   const getTrackerData = useCallback(
     async (day: string) => {
       if (!clinic) return { data: null, error: "No clinic loaded." };
@@ -876,6 +896,7 @@ export function ClinicProvider({ slug, children }: { slug: string; children: Rea
       setVisitProvider,
       setTimerTargets,
       getTrackerData,
+      getNurseTrackerData,
       setStaffColor,
       refresh: refreshAll,
       setFollowup,

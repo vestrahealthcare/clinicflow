@@ -86,11 +86,13 @@ export const MAX_STAFF: Record<"doctor" | "nurse" | "frontdesk", number> = {
 };
 
 // Fishbowl square colors. The whole square is one solid color:
-//   vacant white, occupied light gray, ready for doctor blue, contamination lockout red.
+//   vacant white, occupied light gray, ready for doctor blue, provider in the room green,
+//   contamination lockout red.
 export const BOX_COLOR = {
   vacant: "#FFFFFF",
   occupied: "#CBD5E1",
   readyForDoctor: "#60A5FA",
+  providerInRoom: "#4ADE80",
   lockout: "#EF4444"
 } as const;
 

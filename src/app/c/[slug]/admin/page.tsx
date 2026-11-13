@@ -5,6 +5,7 @@ import { useClinic } from "@/lib/clinicContext";
 import { LiveTimer } from "@/components/LiveTimer";
 import { StaffRoster } from "@/components/StaffRoster";
 import { TrackerPanel } from "@/components/TrackerPanel";
+import { PerPersonPanel } from "@/components/PerPersonPanel";
 import { TimerColorsCard } from "@/components/TimerColorsCard";
 import { TestModeCard } from "@/components/TestModeCard";
 import { STAGE_LABEL } from "@/lib/constants";
@@ -414,6 +415,8 @@ export default function AdminPage() {
               Timer colors (when a step turns yellow and red) are set on the Setup tab.
             </p>
           </div>
+
+          <PerPersonPanel />
         </>
       )}
     </div>

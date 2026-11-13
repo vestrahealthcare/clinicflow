@@ -22,7 +22,7 @@ export function addDays(day: string, n: number): string {
  *   That day = D only, Last 7 days = D-6 to D, Last 30 days = D-29 to D (and only visits since the
  *   30 day reset), All time = everything up to D. The 7 day and all time columns ignore the reset.
  */
-export function rowsFor(rows: TrackerRow[], day: string, w: WindowKey): TrackerRow[] {
+export function rowsFor<T extends { visit_date: string; after_reset: boolean }>(rows: T[], day: string, w: WindowKey): T[] {
   switch (w) {
     case "day":
       return rows.filter((r) => r.visit_date === day);

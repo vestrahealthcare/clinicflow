@@ -135,7 +135,8 @@ nurse roster from its own Admin page after that.
   one, and "Name has it" shows on the room and board. The button is on
   both the board card and the room page.
 - **Fishbowl colors.** The whole square is one solid color: white when
-  vacant, light gray when occupied, blue at Ready for doctor, red in
+  vacant, light gray when occupied, blue at Ready for doctor, green while the
+  provider is in the room, red in
   Contamination lockout. There are no role colors or legend any more.
 - **Flashing.** The whole square blinks between its own color and the flash
   color: blue for tests and support requests, pink for Shots, orange for a
@@ -175,7 +176,7 @@ nurse roster from its own Admin page after that.
 ## How the colors work
 
 On the Fishbowl board the color shows the room's status: white vacant (and
-"Turning over"), gray occupied, blue ready for the doctor, red contamination
+"Turning over"), gray occupied, blue ready for the doctor, green while the provider is in the room, red contamination
 lockout. A flashing square means someone is being asked for something (see
 Flashing above): tests, support requests and messages blink yellow, Shots
 blink pink, a lockout blinks red. Every occupied square shows the visit's
@@ -278,3 +279,15 @@ combination. Each item has its own "I've got it" on the room page and again in t
 the Front desk tab after check out. Pt departed asks for confirmation if any item is still not picked up.
 
 Run supabase/update_2026_11_04.sql (after update 4) before deploying this version.
+
+
+## Per provider and per nurse or MA (update 7)
+
+At the bottom of the Admin Tracker tab, under Per room, there are two more tables with a window picker
+(Today, Last 7 days, Last 30 days, All time):
+- **Per provider:** visits and average step times and door to door time for each provider.
+- **Per nurse and MA:** patients prepped and average prep time for whoever tapped Start prep. Nurses and
+  MAs share the Nurses list on the roster. Counts begin the day update 7 is installed. A prep started with
+  no name picked under "Who are you?" shows as "No name picked".
+
+Run supabase/update_2026_11_13.sql (after updates 4 and 6) before deploying this version.
